@@ -7,7 +7,7 @@ Drizzle/PostgreSQL data layer. Run with `tsx` via Node `--env-file`.
 apps/backend/
 ├── package.json        # scripts: dev/start/typecheck, db:*, auth:generate
 ├── tsconfig.json
-├── drizzle.config.ts   # drizzle-kit config (schema, out=./drizzle, pg)
+├── drizzle.config.ts   # drizzle-kit config (schema, out=./drizzle, pg); loads root .env
 ├── drizzle/            # generated SQL migrations (0000_*.sql applied)
 ├── scripts/
 │   └── ensure-db.mjs   # idempotent CREATE DATABASE from DATABASE_URL
