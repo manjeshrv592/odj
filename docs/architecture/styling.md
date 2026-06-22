@@ -98,6 +98,14 @@ Change these, not call sites — everything inherits.
   `components/ui/text.tsx` — `font-sans` default + `TextClassContext`.
   `components/ui/otp-input.tsx` — segmented OTP field (transparent overlay input).
 
+## 6. Third-party widgets
+
+- **Uploadcare file uploader** (`components/avatar-uploader.tsx`, web) keeps its
+  **own default styling** — the one deliberate exception to "use our primitives".
+  Frame it with our `Card`/`Label`/`Button`, but don't try to restyle its
+  internals here. (If brand-matching is needed later, theme it via Uploadcare's
+  CSS custom properties, not by overriding our tokens.)
+
 ## Checklist when restyling
 
 1. Color/radius → edit the two token files **together** (web oklch + mobile hsl).

@@ -74,6 +74,17 @@ export const emailSchema = z
 /** A 6-digit one-time passcode. */
 export const otpSchema = z.string().regex(/^\d{6}$/, "OTP must be 6 digits");
 
+/**
+ * Contact phone number, stored as-is (no SMS/OTP verification yet — that lands
+ * with DLT). Lenient: allows a leading `+`, digits, spaces, dashes, parentheses.
+ */
+export const phoneSchema = z
+  .string()
+  .trim()
+  .min(7, "Enter a valid phone number")
+  .max(20, "Phone number is too long")
+  .regex(/^\+?[\d\s()-]+$/, "Enter a valid phone number");
+
 // ── Identity / onboarding ────────────────────────────────────────────────────
 
 /**
@@ -90,8 +101,39 @@ export const sessionUserSchema = z.object({
   userType: userTypeSchema.nullish(),
   adminRole: adminRoleSchema.nullish(),
   onboardingCompleted: z.boolean().default(false),
+  firstName: z.string().nullish(),
+  lastName: z.string().nullish(),
+  phone: z.string().nullish(),
 });
 export type SessionUser = z.infer<typeof sessionUserSchema>;
+
+// ── Admin profile (onboarding wizard + profile page) ─────────────────────────
+
+/**
+ * Partial update of an admin's own profile (name / phone / avatar). Used by the
+ * Profile page; `name` is derived server-side as "first last". Email is NOT here
+ * — it changes via the OTP flow (better-auth emailOTP `changeEmail`).
+ */
+export const adminProfileUpdateSchema = z.object({
+  firstName: z.string().trim().min(1).max(60).optional(),
+  lastName: z.string().trim().min(1).max(60).optional(),
+  phone: phoneSchema.optional(),
+  image: z.url().nullish(),
+});
+export type AdminProfileUpdate = z.infer<typeof adminProfileUpdateSchema>;
+
+/**
+ * Wizard finish payload: completes admin onboarding in one shot. First/last name
+ * and phone are required; avatar is optional (the step is skippable). The server
+ * derives `name` and flips `onboardingCompleted` to true.
+ */
+export const completeOnboardingSchema = z.object({
+  firstName: z.string().trim().min(1, "First name is required").max(60),
+  lastName: z.string().trim().min(1, "Last name is required").max(60),
+  phone: phoneSchema,
+  image: z.url().nullish(),
+});
+export type CompleteOnboarding = z.infer<typeof completeOnboardingSchema>;
 
 // ── Admin portal users (invite-only) ─────────────────────────────────────────
 

@@ -74,4 +74,5 @@ shared conventions; each package file holds its own file/function/component map.
 (`nativewind` + Tailwind v3) and react-native-reusables deps (`clsx`,
 `tailwind-merge`, `class-variance-authority`), plus shadcn's standard companions
 on web (`class-variance-authority`, `clsx`, `tailwind-merge`, `lucide-react`,
-`tw-animate-css`, `@base-ui/react`).
+`tw-animate-css`, `@base-ui/react`), and `@uploadcare/react-uploader` (web only —
+admin profile avatar uploads via the Uploadcare CDN).

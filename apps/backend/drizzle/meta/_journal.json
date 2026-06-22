@@ -15,6 +15,13 @@
       "when": 1782122657786,
       "tag": "0001_flat_riptide",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1782143007185,
+      "tag": "0002_strange_tusk",
+      "breakpoints": true
     }
   ]
 }

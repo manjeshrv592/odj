@@ -37,6 +37,10 @@ sub-items as scope is refined. `[x]` done · `[~]` in progress · `[ ]` not star
 - [ ] Define required documents per domain
 - [x] Admin dashboard shell + auth (admin role) — sidebar shell, root seed,
   Portal-users CRUD (invite/rename/delete admins by email)
+- [x] Admin profile completion (onboarding) — gated 3-step wizard (name, phone,
+  optional Uploadcare avatar) before the dashboard; flips `onboardingCompleted`
+- [x] Admin profile page — edit name/phone/avatar (no OTP) + OTP-verified email
+  change (code sent to the new address)
 - [ ] Dashboard analytics with shadcn charts
 
 ## 3. Admin — approvals

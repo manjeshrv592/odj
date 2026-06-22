@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { LayoutDashboard, Users, LogOut } from "lucide-react";
+import { LayoutDashboard, Users, CircleUser, LogOut } from "lucide-react";
 import { signOut } from "@/lib/auth-client";
 import {
   Sidebar,
@@ -19,6 +19,7 @@ import {
 const NAV = [
   { title: "Dashboard", href: "/", icon: LayoutDashboard },
   { title: "Portal users", href: "/portal-users", icon: Users },
+  { title: "Profile", href: "/profile", icon: CircleUser },
 ] as const;
 
 /** Left navigation for the admin portal: nav links + sign-out. */
