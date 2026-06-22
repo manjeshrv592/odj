@@ -40,6 +40,9 @@ Thumbs.db
 .vscode/*
 !.vscode/extensions.json
 
+# Claude Code (local harness config)
+.claude/
+
 # Drizzle
 apps/backend/drizzle/meta/_journal.json.bak
 
