@@ -21,6 +21,8 @@ export default async function DashboardLayout({
 }) {
   const user = await getServerSessionUser();
   if (!isAdmin(user)) redirect("/login");
+  // Admins must finish the profile wizard before reaching the dashboard.
+  if (!user!.onboardingCompleted) redirect("/onboarding");
 
   return (
     <SidebarProvider>

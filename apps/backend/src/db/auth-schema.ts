@@ -32,6 +32,11 @@ export const user = pgTable("user", {
   onboardingCompleted: boolean("onboarding_completed")
     .$defaultFn(() => false)
     .notNull(),
+  // Profile fields (admin onboarding + profile page). `name` is kept as the
+  // derived "first last"; these hold the parts plus the contact phone.
+  firstName: text("first_name"),
+  lastName: text("last_name"),
+  phone: text("phone"),
   createdAt: timestamp("created_at")
     .$defaultFn(() => new Date())
     .notNull(),

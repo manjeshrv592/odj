@@ -45,6 +45,12 @@ export const auth = betterAuth({
         defaultValue: false,
         input: false,
       },
+      // Profile fields, written server-side (admin onboarding wizard + profile
+      // page). `name` is derived as "first last" on write. `input: false` keeps
+      // clients from setting them at sign-in.
+      firstName: { type: "string", required: false, input: false },
+      lastName: { type: "string", required: false, input: false },
+      phone: { type: "string", required: false, input: false },
     },
   },
   trustedOrigins: [
@@ -57,6 +63,10 @@ export const auth = betterAuth({
     emailOTP({
       otpLength: 6,
       expiresIn: 60 * 5, // 5 minutes
+      // OTP-based email change: the OTP is sent to the NEW email (the current
+      // email is already proven by the active session, so `verifyCurrentEmail`
+      // is left off). Exposes requestEmailChange / changeEmail on the client.
+      changeEmail: { enabled: true },
       async sendVerificationOTP({ email, otp, type }) {
         await sendOtpEmail({ email, otp, type });
       },

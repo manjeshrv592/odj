@@ -42,8 +42,15 @@ packages/shared/
   description?, isActive). `createCategorySchema` / `CreateCategory` — omit id.
 - `emailSchema` — email, normalised to lowercase/trimmed.
 - `otpSchema` — 6-digit OTP string.
+- `phoneSchema` — lenient stored phone (`+`/digits/spaces/()-, 7–20 chars; no SMS
+  verification yet).
 - `sessionUserSchema` / `SessionUser` — app-facing user projection (id, email,
-  name, emailVerified, image?, userType?, adminRole?, onboardingCompleted).
+  name, emailVerified, image?, userType?, adminRole?, onboardingCompleted,
+  firstName?, lastName?, phone?).
+- `adminProfileUpdateSchema` / `AdminProfileUpdate` — partial own-profile update
+  (firstName?, lastName?, phone?, image?) for `PATCH /api/portal/me`.
+- `completeOnboardingSchema` / `CompleteOnboarding` — wizard finish payload
+  (firstName, lastName, phone required; image optional).
 - `inviteAdminSchema` / `InviteAdmin` — `{ email }` (admin invite input).
 - `portalUserSchema` / `PortalUser` — admin row for the Portal-users table.
 
