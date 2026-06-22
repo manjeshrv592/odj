@@ -1,6 +1,12 @@
 packages:
   - "apps/*"
   - "packages/*"
+# Expo / React Native need a flat node_modules so Metro + NativeWind's
+# babel-injected imports (e.g. `react-native-css-interop/jsx-runtime`) resolve
+# from app files. pnpm 11 reads these from here, NOT `.npmrc`.
+nodeLinker: hoisted
+strictPeerDependencies: false
+autoInstallPeers: true
 # Pin better-call so better-auth's scoped packages all resolve the same version
 # (prevents the hoisted-linker picking an older copy that breaks @better-auth/core).
 overrides:
