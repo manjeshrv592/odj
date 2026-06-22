@@ -8,7 +8,9 @@ apps/backend/
 ├── package.json        # scripts: dev/start/typecheck, db:*, auth:generate
 ├── tsconfig.json
 ├── drizzle.config.ts   # drizzle-kit config (schema, out=./drizzle, pg)
-├── drizzle/            # generated SQL migrations (after db:generate)
+├── drizzle/            # generated SQL migrations (0000_*.sql applied)
+├── scripts/
+│   └── ensure-db.mjs   # idempotent CREATE DATABASE from DATABASE_URL
 └── src/
     ├── index.ts        # entry: start server, graceful shutdown
     ├── app.ts          # createApp() — express app, middleware, routes
@@ -66,6 +68,11 @@ apps/backend/
 - `sendOtpEmail({ email, otp, type })` — sends the OTP via Resend. In non-prod,
   logs the OTP to console if Resend fails (keeps local dev unblocked without a
   verified sender domain).
+
+## scripts/ensure-db.mjs
+- Connects to the `postgres` maintenance DB (from `DATABASE_URL`) and
+  `CREATE DATABASE` the target if it doesn't exist. Used by `db:ensure`;
+  `db:setup` = `db:ensure` + `db:migrate` (one-shot local DB bootstrap).
 
 ## src/routes/health.ts
 - `healthRouter` (mounted at `/api/health`):

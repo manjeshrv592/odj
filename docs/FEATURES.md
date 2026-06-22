@@ -14,7 +14,8 @@ sub-items as scope is refined. `[x]` done · `[~]` in progress · `[ ]` not star
 - [x] Mobile: Expo + expo-router + NativeWind + TanStack Query; shows "ODJ mobile app"
 - [x] Dark/light theme on web (next-themes) and mobile (NativeWind + Context)
 - [x] Project docs: CLAUDE.md, ARCHITECTURE + per-package, FEATURES
-- [~] Database `odj` created + migrations applied + health verified (needs DB credentials)
+- [x] Database `odj` created + migrations applied + health verified (`/api/health/db` → connected)
+- [x] Email: Resend domain `sigtest.website` verified; real test send confirmed (sender `no-reply@sigtest.website`)
 
 ## 1. Authentication & onboarding
 

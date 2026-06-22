@@ -120,7 +120,12 @@ pnpm build                # build all (turbo)
 pnpm db:generate          # drizzle-kit: generate migration from schema
 pnpm db:migrate           # apply migrations
 pnpm db:studio            # drizzle studio
+pnpm --filter @odj/backend db:setup   # create `odj` DB (if missing) + migrate
 ```
+
+**Status:** the `odj` database is created and migrated; health endpoints return
+connected. Email is live — Resend domain `sigtest.website` is verified and a real
+test send succeeded (sender `no-reply@sigtest.website`).
 
 **Health checks (backend):** `GET /api/health` (liveness, never fails on DB
 blips) and `GET /api/health/db` (readiness — 200 if DB reachable, 503 if not).
