@@ -1,0 +1,27 @@
+{
+  "name": "odj",
+  "version": "0.0.1",
+  "private": true,
+  "description": "ODJ — hiring platform monorepo (mobile, web, backend)",
+  "packageManager": "pnpm@11.5.2",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "dev": "turbo run dev",
+    "build": "turbo run build",
+    "lint": "turbo run lint",
+    "typecheck": "turbo run typecheck",
+    "clean": "turbo run clean && rimraf node_modules",
+    "dev:web": "turbo run dev --filter=@odj/web",
+    "dev:mobile": "turbo run dev --filter=@odj/mobile",
+    "dev:backend": "turbo run dev --filter=@odj/backend",
+    "db:generate": "pnpm --filter @odj/backend db:generate",
+    "db:migrate": "pnpm --filter @odj/backend db:migrate",
+    "db:studio": "pnpm --filter @odj/backend db:studio"
+  },
+  "devDependencies": {
+    "turbo": "^2.5.4",
+    "typescript": "^5.8.3"
+  }
+}

@@ -1,0 +1,15 @@
+packages:
+  - "apps/*"
+  - "packages/*"
+# Pin better-call so better-auth's scoped packages all resolve the same version
+# (prevents the hoisted-linker picking an older copy that breaks @better-auth/core).
+overrides:
+  better-call: "1.3.6"
+allowBuilds:
+  # Unused optional peers pulled in by better-auth's adapter surface — keep disabled.
+  '@prisma/client': false
+  better-sqlite3: false
+  # Native deps we actually rely on (bundlers, image processing, resolver).
+  esbuild: true
+  sharp: true
+  unrs-resolver: true
