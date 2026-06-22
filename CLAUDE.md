@@ -129,4 +129,20 @@ test send succeeded (sender `no-reply@sigtest.website`).
 
 **Health checks (backend):** `GET /api/health` (liveness, never fails on DB
 blips) and `GET /api/health/db` (readiness — 200 if DB reachable, 503 if not).
+
+## 7. Git conventions
+
+Git + GitHub are the source of truth for history — we do **not** keep a markdown
+log of commits/branches/merges (redundant). We do follow these rules:
+
+- **Never commit directly to `main`.** Branch per unit of work off `main`:
+  - `feat/<slug>` new feature · `fix/<slug>` bug fix · `chore/<slug>` tooling/deps
+  - `docs/<slug>` docs · `refactor/<slug>` no-behavior-change cleanup
+- **Open a Pull Request** to merge into `main`. The PR (diff + description +
+  discussion) is the durable record of what merged and why — not a tracked file.
+- **Commit messages:** `type: short imperative summary` (e.g. `feat: email OTP
+  login screens`), body explaining *why* when useful. AI commits end with the
+  `Co-Authored-By` trailer.
+- **Only commit/push when the user asks.** Don't commit unprompted.
+- **Never commit secrets.** `.env` is git-ignored; only `.env.example` is tracked.
 ```
