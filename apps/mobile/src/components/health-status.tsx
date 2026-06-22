@@ -23,7 +23,7 @@ export function HealthStatus() {
 
   return (
     <View className="w-full max-w-sm rounded-lg border border-border bg-card p-4">
-      <Text className="mb-3 text-sm font-medium text-muted-foreground">
+      <Text className="mb-3 text-sm font-poppins-medium text-muted-foreground">
         Backend status
       </Text>
       {isLoading ? (

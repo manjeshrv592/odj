@@ -6,8 +6,8 @@ import {
   type ReactNode,
 } from "react";
 import { useColorScheme } from "nativewind";
-import * as SecureStore from "expo-secure-store";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { storage } from "@/lib/storage";
 
 /**
  * App-wide providers for the mobile app:
@@ -41,7 +41,7 @@ function ThemeProvider({ children }: { children: ReactNode }) {
 
   // Restore the saved preference on first mount.
   useEffect(() => {
-    void SecureStore.getItemAsync(STORAGE_KEY).then((stored) => {
+    void storage.getItemAsync(STORAGE_KEY).then((stored) => {
       if (stored === "light" || stored === "dark" || stored === "system") {
         setPreference(stored);
         setColorScheme(stored);
@@ -52,7 +52,7 @@ function ThemeProvider({ children }: { children: ReactNode }) {
   const setTheme = (p: ThemePref) => {
     setPreference(p);
     setColorScheme(p);
-    void SecureStore.setItemAsync(STORAGE_KEY, p);
+    void storage.setItemAsync(STORAGE_KEY, p);
   };
 
   const toggle = () => setTheme(colorScheme === "dark" ? "light" : "dark");

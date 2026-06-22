@@ -22,6 +22,9 @@ export const backendEnvSchema = z.object({
   EMAIL_FROM: z.string().min(1),
   WEB_ORIGIN: z.url().default("http://localhost:3000"),
   MOBILE_SCHEME: z.string().default("odj"),
+  // Email of the bootstrap super-admin. Seeded as the `root` portal user at
+  // backend startup (idempotent). Required so a first admin always exists.
+  ROOT_USER_EMAIL: z.email(),
 });
 
 export type BackendEnv = z.infer<typeof backendEnvSchema>;

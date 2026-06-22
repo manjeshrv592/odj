@@ -4,6 +4,7 @@ import { toNodeHandler } from "better-auth/node";
 import { auth } from "./auth";
 import { env } from "./env";
 import { healthRouter } from "./routes/health";
+import { portalRouter } from "./routes/portal";
 
 /**
  * Build the Express application. Kept separate from server startup so it can be
@@ -28,6 +29,7 @@ export function createApp(): Express {
   app.use(express.json());
 
   app.use("/api/health", healthRouter);
+  app.use("/api/portal", portalRouter);
 
   app.get("/", (_req: Request, res: Response) => {
     res.json({ name: "odj-backend", status: "ok" });

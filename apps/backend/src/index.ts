@@ -1,9 +1,13 @@
 import { createApp } from "./app";
 import { env } from "./env";
 import { pool } from "./db";
+import { seedRootAdmin } from "./db/seed-root";
 
 /** Process entry point: start the HTTP server and handle graceful shutdown. */
 const app = createApp();
+
+// Ensure the bootstrap super-admin exists (idempotent, non-fatal on failure).
+void seedRootAdmin();
 
 const server = app.listen(env.PORT, () => {
   console.log(`[odj-backend] listening on http://localhost:${env.PORT}`);

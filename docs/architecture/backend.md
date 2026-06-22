@@ -16,20 +16,25 @@ apps/backend/
     ├── app.ts          # createApp() — express app, middleware, routes
     ├── env.ts          # validated env (parseBackendEnv from @odj/shared)
     ├── auth/
-    │   └── index.ts    # better-auth instance (emailOTP + drizzle + expo)
+    │   └── index.ts    # better-auth instance (emailOTP + drizzle + expo + additionalFields)
     ├── db/
     │   ├── index.ts    # pg Pool + drizzle client (db), schema namespace
     │   ├── schema.ts   # full schema = auth tables + domain tables
-    │   └── auth-schema.ts # better-auth tables (user/session/account/verification)
+    │   ├── auth-schema.ts # better-auth tables (+ ODJ user fields)
+    │   └── seed-root.ts   # idempotent root-admin seed (from ROOT_USER_EMAIL)
     ├── lib/
-    │   └── email.ts    # Resend OTP sender
+    │   └── email.ts    # Resend HTML emails: OTP + admin invite
+    ├── middleware/
+    │   └── require-admin.ts # admin-only guard (better-auth session + adminRole)
     └── routes/
-        └── health.ts   # liveness + readiness endpoints
+        ├── health.ts   # liveness + readiness endpoints
+        └── portal.ts   # admin Portal-users CRUD + invite (/api/portal)
 ```
 
 ## src/index.ts
-- Entry point. Builds the app via `createApp()`, listens on `env.PORT`, logs the
-  routes, and handles `SIGINT`/`SIGTERM` graceful shutdown (closes server + pg pool).
+- Entry point. Builds the app via `createApp()`, fires `seedRootAdmin()` (non-blocking,
+  idempotent), listens on `env.PORT`, logs the routes, and handles `SIGINT`/`SIGTERM`
+  graceful shutdown (closes server + pg pool).
 
 ## src/app.ts
 - `createApp(): Express` — constructs the app:
@@ -37,7 +42,7 @@ apps/backend/
   - Mounts better-auth **before** `express.json()` at `ALL /api/auth/{*any}`
     (Express 5 named wildcard) via `toNodeHandler(auth)`.
   - `express.json()` for everything else.
-  - `/api/health` router; `GET /` info route.
+  - `/api/health` router; `/api/portal` router; `GET /` info route.
 
 ## src/env.ts
 - `env` — `parseBackendEnv(process.env)`, parsed once at import (fail-fast).
@@ -45,9 +50,31 @@ apps/backend/
 ## src/auth/index.ts
 - `auth` — the single better-auth server instance:
   - `drizzleAdapter(db, { provider: "pg", schema: {user,session,account,verification} })`.
+  - `user.additionalFields`: `userType`, `adminRole` (string, `input:false`),
+    `onboardingCompleted` (boolean, default false, `input:false`) — the ODJ
+    identity model, set server-side only. Clients mirror these via
+    `inferAdditionalFields` (see web/mobile auth-client).
   - `trustedOrigins`: web origin, `odj://`, `exp://`, `exp://**`.
   - Plugins: `emailOTP` (6-digit, 5-min expiry, sends via `sendOtpEmail`) + `expo()`.
 - `Auth` — inferred type.
+
+## src/db/seed-root.ts
+- `seedRootAdmin()` — idempotent bootstrap of the super-admin from
+  `env.ROOT_USER_EMAIL`: inserts a pending `userType:"admin"`, `adminRole:"root"`
+  user if absent, else promotes an existing row. Non-fatal (logs on error).
+
+## src/middleware/require-admin.ts
+- `requireAdmin(req,res,next)` — admin-only guard. Reads the session via
+  `auth.api.getSession({ headers: fromNodeHeaders(req.headers) })`; 401 if no
+  session, 403 if `adminRole ∉ {root, admin}`, else attaches `req.admin`.
+- `AdminContext` — type of the attached admin user (augments `Express.Request`).
+
+## src/routes/portal.ts
+- `portalRouter` (mounted `/api/portal`, all routes behind `requireAdmin`):
+  - `GET /users` — list portal admins (`userType='admin'`), `PortalUser[]`.
+  - `POST /users/invite` — `{ email }`; create/promote a pending admin and email
+    the branded invite. Resends for an existing admin; 409 for the root email.
+  - `DELETE /users/:id` — remove an admin (blocks root + self-delete).
 
 ## src/db/index.ts
 - `pool` — shared `pg.Pool` (max 10).
@@ -61,13 +88,17 @@ apps/backend/
 
 ## src/db/auth-schema.ts
 - better-auth Drizzle tables: `user`, `session`, `account`, `verification`.
-  Mirrors `@better-auth/cli generate` output; regenerate via `pnpm --filter
-  @odj/backend auth:generate` if better-auth changes its schema.
+  Mirrors `@better-auth/cli generate` output. The `user` table also carries ODJ's
+  additional columns: `user_type`, `admin_role`, `onboarding_completed` (kept in
+  sync with `auth/index.ts` `additionalFields`; migration `0001_*`).
 
 ## src/lib/email.ts
-- `sendOtpEmail({ email, otp, type })` — sends the OTP via Resend. In non-prod,
-  logs the OTP to console if Resend fails (keeps local dev unblocked without a
-  verified sender domain).
+- `sendOtpEmail({ email, otp, type })` — branded **HTML** OTP email (text
+  fallback) via Resend.
+- `sendAdminInviteEmail({ email, inviteUrl })` — branded admin invite/welcome
+  email with a CTA to `WEB_ORIGIN/login?invited=<email>`.
+- Internal `emailShell()` (shared header/footer markup) + `send()` (Resend call
+  with the non-prod dev fallback: logs instead of throwing when Resend fails).
 
 ## scripts/ensure-db.mjs
 - Connects to the `postgres` maintenance DB (from `DATABASE_URL`) and

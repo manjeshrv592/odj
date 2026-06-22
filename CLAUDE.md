@@ -64,6 +64,7 @@ odj/
 | Auth               | **better-auth** — email OTP via **Resend** (SMS later)        |
 | Server state       | **TanStack Query** (works in web AND React Native)            |
 | UI state / theming | **React Context** (+ next-themes on web, NativeWind on mobile)|
+| Design system      | **Poppins** font + single **blue** primary; shared tokens (`docs/architecture/styling.md`) |
 | Email              | **Resend**                                                    |
 
 **Auth model:** one better-auth server lives in the Express backend at
@@ -94,6 +95,10 @@ sign-in.
   `shared`): folder tree + every file's exports (functions/components/types) with
   a one-line purpose, so an agent knows *what to change, where* without scanning
   source.
+- **`docs/architecture/styling.md`** — the **design system** (cross-cutting):
+  Poppins font, the single blue primary, radius, elevation, and the reusable
+  web/mobile primitives. Edit visual tokens here (in lockstep across web + mobile),
+  not per element.
 - **`docs/FEATURES.md`** — the full feature roadmap with status.
 
 **Maintenance rule (do this as you code):** when you add or change a

@@ -44,9 +44,20 @@ module.exports = {
         },
       },
       borderRadius: {
+        xl: "calc(var(--radius) + 4px)",
         lg: "var(--radius)",
         md: "calc(var(--radius) - 2px)",
         sm: "calc(var(--radius) - 4px)",
+      },
+      // React Native needs a distinct font family per weight (it can't synthesise
+      // weights from one Poppins file). Weight-named keys avoid colliding with
+      // Tailwind's `font-medium`/`font-bold` (which set fontWeight, not family):
+      //   font-sans (400) · font-poppins-medium (500) · -semibold (600) · -bold (700)
+      fontFamily: {
+        sans: ["Poppins_400Regular"],
+        "poppins-medium": ["Poppins_500Medium"],
+        "poppins-semibold": ["Poppins_600SemiBold"],
+        "poppins-bold": ["Poppins_700Bold"],
       },
     },
   },

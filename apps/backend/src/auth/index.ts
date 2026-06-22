@@ -24,6 +24,29 @@ export const auth = betterAuth({
     provider: "pg",
     schema: { user, session, account, verification },
   }),
+  user: {
+    /**
+     * ODJ identity model layered onto better-auth's `user` row. All three are
+     * `input: false` — clients can never set them at sign-in; they are written
+     * server-side only (root seed, admin invite, future onboarding).
+     *
+     * - `userType`  — marketplace identity: "worker" | "hirer" | "admin".
+     *   Null for a brand-new mobile user until they pick Work/Hire (next feature).
+     * - `adminRole` — "root" | "admin", only set when userType === "admin".
+     * - `onboardingCompleted` — whether profile/role selection is finished;
+     *   drives mobile routing (incomplete → "Continue as" screen).
+     */
+    additionalFields: {
+      userType: { type: "string", required: false, input: false },
+      adminRole: { type: "string", required: false, input: false },
+      onboardingCompleted: {
+        type: "boolean",
+        required: false,
+        defaultValue: false,
+        input: false,
+      },
+    },
+  },
   trustedOrigins: [
     env.WEB_ORIGIN,
     `${env.MOBILE_SCHEME}://`,
