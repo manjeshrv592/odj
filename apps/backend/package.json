@@ -13,10 +13,10 @@
     "auth:generate": "pnpm dlx @better-auth/cli@latest generate --config src/auth/index.ts --output src/db/auth-schema.ts -y",
     "db:ensure": "node --env-file=../../.env scripts/ensure-db.mjs",
     "db:setup": "pnpm db:ensure && pnpm db:migrate",
-    "db:generate": "node --env-file=../../.env --import tsx ./node_modules/drizzle-kit/bin.cjs generate",
-    "db:migrate": "node --env-file=../../.env --import tsx ./node_modules/drizzle-kit/bin.cjs migrate",
-    "db:push": "node --env-file=../../.env --import tsx ./node_modules/drizzle-kit/bin.cjs push",
-    "db:studio": "node --env-file=../../.env --import tsx ./node_modules/drizzle-kit/bin.cjs studio"
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "drizzle-kit migrate",
+    "db:push": "drizzle-kit push",
+    "db:studio": "drizzle-kit studio"
   },
   "dependencies": {
     "@better-auth/expo": "^1.6.20",
