@@ -137,17 +137,26 @@ blips) and `GET /api/health/db` (readiness — 200 if DB reachable, 503 if not).
 
 ## 7. Git conventions
 
-Git + GitHub are the source of truth for history — we do **not** keep a markdown
-log of commits/branches/merges (redundant). We do follow these rules:
+Git (local + the GitHub `origin` remote) is the source of truth for history — we
+do **not** keep a markdown log of commits/branches/merges (redundant). We do
+follow these rules:
 
 - **Never commit directly to `main`.** Branch per unit of work off `main`:
   - `feat/<slug>` new feature · `fix/<slug>` bug fix · `chore/<slug>` tooling/deps
   - `docs/<slug>` docs · `refactor/<slug>` no-behavior-change cleanup
-- **Open a Pull Request** to merge into `main`. The PR (diff + description +
-  discussion) is the durable record of what merged and why — not a tracked file.
+- **Merge locally, no Pull Request / `gh`.** `gh` is not set up here — do **not**
+  try to open PRs. When the work is done and the user asks to ship it, commit on
+  the branch, then merge into `main` locally with a merge commit and push:
+  ```bash
+  git checkout main && git pull --ff-only origin main
+  git merge --no-ff <branch> -m "Merge <branch>: <summary>"
+  git push origin main
+  ```
+  The `--no-ff` merge commit + the branch's own commits are the durable record of
+  what merged and why. Delete the branch afterwards if the user wants.
 - **Commit messages:** `type: short imperative summary` (e.g. `feat: email OTP
   login screens`), body explaining *why* when useful. AI commits end with the
   `Co-Authored-By` trailer.
-- **Only commit/push when the user asks.** Don't commit unprompted.
+- **Only commit/push/merge when the user asks.** Don't commit unprompted.
 - **Never commit secrets.** `.env` is git-ignored; only `.env.example` is tracked.
 ```
