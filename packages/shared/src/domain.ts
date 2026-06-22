@@ -45,26 +45,259 @@ export const approvalStatusSchema = z.enum([
 export type ApprovalStatus = z.infer<typeof approvalStatusSchema>;
 
 /**
- * A working domain/category an admin can define (e.g. "Driver", "Bouncer",
- * "Maid"). Placeholder shape to establish the pattern — extend with required
- * documents, pricing rules, etc. as those features land.
+ * Convert an arbitrary display name into a kebab-case slug. Pure and dependency
+ * free so it can run anywhere (backend, web). Strips accents, lowercases, turns
+ * any run of non-alphanumerics into a single dash, and trims leading/trailing
+ * dashes. The backend layers uniqueness (suffixing `-2`, `-3`, …) on top.
+ */
+export function slugify(name: string): string {
+  return name
+    .normalize("NFKD")
+    .replace(/[̀-ͯ]/g, "") // strip combining accents
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
+// ── Catalog → Categories → Professions ───────────────────────────────────────
+
+/** Reusable kebab-case slug field (server-generated; clients only read it). */
+const slugFieldSchema = z
+  .string()
+  .min(1)
+  .max(80)
+  .regex(/^[a-z0-9-]+$/, "slug must be kebab-case");
+
+/**
+ * A working domain/category an admin defines (e.g. "Driver", "Bouncer", "Maid").
+ * A Category is a group of Professions and carries an icon image (Uploadcare CDN
+ * url). `slug` is auto-generated from `name` server-side; `isActive` toggles
+ * visibility without deleting.
  */
 export const categorySchema = z.object({
   id: z.uuid(),
   name: z.string().min(2).max(80),
-  slug: z
-    .string()
-    .min(2)
-    .max(80)
-    .regex(/^[a-z0-9-]+$/, "slug must be kebab-case"),
-  description: z.string().max(500).optional(),
+  slug: slugFieldSchema,
+  description: z.string().max(500).nullish(),
+  image: z.url().nullish(),
   isActive: z.boolean().default(true),
 });
 export type Category = z.infer<typeof categorySchema>;
 
-/** Payload to create a category (server assigns `id`). */
-export const createCategorySchema = categorySchema.omit({ id: true });
+/** Create a category (server generates `id` + `slug`, sets `isActive`). */
+export const createCategorySchema = z.object({
+  name: z.string().trim().min(2).max(80),
+  description: z.string().trim().max(500).nullish(),
+  image: z.url().nullish(),
+});
 export type CreateCategory = z.infer<typeof createCategorySchema>;
+
+/** Update a category. All fields optional; `slug` re-derives when `name` changes. */
+export const updateCategorySchema = z.object({
+  name: z.string().trim().min(2).max(80).optional(),
+  description: z.string().trim().max(500).nullish(),
+  image: z.url().nullish(),
+  isActive: z.boolean().optional(),
+});
+export type UpdateCategory = z.infer<typeof updateCategorySchema>;
+
+/**
+ * A Profession belongs to exactly one Category (e.g. "Cab Driver" under
+ * "Driver"). Name + auto slug only (no icon). `position` orders professions
+ * within their category.
+ */
+export const professionSchema = z.object({
+  id: z.uuid(),
+  categoryId: z.uuid(),
+  name: z.string().min(2).max(80),
+  slug: slugFieldSchema,
+  isActive: z.boolean().default(true),
+  position: z.number().int(),
+});
+export type Profession = z.infer<typeof professionSchema>;
+
+/** Create a profession (category comes from the route; server makes id + slug). */
+export const createProfessionSchema = z.object({
+  name: z.string().trim().min(2).max(80),
+});
+export type CreateProfession = z.infer<typeof createProfessionSchema>;
+
+/** Update a profession. `position` is used for reordering within the category. */
+export const updateProfessionSchema = z.object({
+  name: z.string().trim().min(2).max(80).optional(),
+  isActive: z.boolean().optional(),
+  position: z.number().int().min(0).optional(),
+});
+export type UpdateProfession = z.infer<typeof updateProfessionSchema>;
+
+// ── Requirement fields (cascading worker questions) ──────────────────────────
+
+/**
+ * The three levels a requirement field attaches to, which cascade onto a
+ * profession's effective set: `catalog` (all workers) → `category` (all
+ * professions in it) → `profession` (that one only).
+ */
+export const requirementLevelSchema = z.enum([
+  "catalog",
+  "category",
+  "profession",
+]);
+export type RequirementLevel = z.infer<typeof requirementLevelSchema>;
+
+/** Input type a worker uses to answer a requirement field (for now). */
+export const requirementInputTypeSchema = z.enum(["text", "file", "select"]);
+export type RequirementInputType = z.infer<typeof requirementInputTypeSchema>;
+
+/** File types an admin may allow for a `file` requirement field. */
+export const allowedFileTypeSchema = z.enum(["pdf", "jpg", "jpeg", "png"]);
+export type AllowedFileType = z.infer<typeof allowedFileTypeSchema>;
+
+/** A selectable option for a `select` requirement field. */
+export const requirementOptionSchema = z.object({
+  value: z.string().trim().min(1).max(80),
+  label: z.string().trim().min(1).max(120),
+});
+export type RequirementOption = z.infer<typeof requirementOptionSchema>;
+
+/**
+ * A single admin-authored question/document a worker provides. `key` is a
+ * stable, immutable identifier (generated once from the label) that future
+ * worker answers map to — editing `label` never changes it. `options` is set
+ * only for `select`, `allowedFileTypes` only for `file`.
+ */
+export const requirementFieldSchema = z.object({
+  id: z.uuid(),
+  level: requirementLevelSchema,
+  categoryId: z.uuid().nullish(),
+  professionId: z.uuid().nullish(),
+  key: z.string(),
+  label: z.string().min(1).max(160),
+  inputType: requirementInputTypeSchema,
+  required: z.boolean().default(false),
+  options: z.array(requirementOptionSchema).nullish(),
+  allowedFileTypes: z.array(allowedFileTypeSchema).nullish(),
+  position: z.number().int(),
+  isActive: z.boolean().default(true),
+});
+export type RequirementField = z.infer<typeof requirementFieldSchema>;
+
+/**
+ * Shared shape of the writable parts of a requirement field, with cross-field
+ * rules: a `select` needs ≥1 option; a `file` needs ≥1 allowed file type; the
+ * `level` must match which target id is supplied (catalog → none, category →
+ * categoryId, profession → professionId).
+ */
+const requirementFieldBody = z.object({
+  level: requirementLevelSchema,
+  categoryId: z.uuid().nullish(),
+  professionId: z.uuid().nullish(),
+  label: z.string().trim().min(1).max(160),
+  inputType: requirementInputTypeSchema,
+  required: z.boolean().default(false),
+  options: z.array(requirementOptionSchema).max(50).optional(),
+  allowedFileTypes: z.array(allowedFileTypeSchema).optional(),
+});
+
+function refineRequirementBody(
+  data: z.infer<typeof requirementFieldBody>,
+  ctx: z.RefinementCtx,
+): void {
+  if (data.inputType === "select" && (data.options?.length ?? 0) === 0) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["options"],
+      message: "Add at least one option for a dropdown field",
+    });
+  }
+  if (
+    data.inputType === "file" &&
+    (data.allowedFileTypes?.length ?? 0) === 0
+  ) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["allowedFileTypes"],
+      message: "Pick at least one allowed file type",
+    });
+  }
+  if (data.level === "catalog" && (data.categoryId || data.professionId)) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["level"],
+      message: "Catalog-level fields must not target a category or profession",
+    });
+  }
+  if (data.level === "category" && !data.categoryId) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["categoryId"],
+      message: "Category-level fields require a categoryId",
+    });
+  }
+  if (data.level === "profession" && !data.professionId) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["professionId"],
+      message: "Profession-level fields require a professionId",
+    });
+  }
+}
+
+/** Create a requirement field (server makes id + stable `key` + position). */
+export const createRequirementFieldSchema =
+  requirementFieldBody.superRefine(refineRequirementBody);
+export type CreateRequirementField = z.infer<
+  typeof createRequirementFieldSchema
+>;
+
+/**
+ * Update a requirement field. Level/target are fixed once created, so only the
+ * editable parts are accepted; `position` supports reordering within the scope.
+ * `key` is intentionally absent — it is immutable.
+ */
+export const updateRequirementFieldSchema = z
+  .object({
+    label: z.string().trim().min(1).max(160).optional(),
+    inputType: requirementInputTypeSchema.optional(),
+    required: z.boolean().optional(),
+    options: z.array(requirementOptionSchema).max(50).nullish(),
+    allowedFileTypes: z.array(allowedFileTypeSchema).nullish(),
+    isActive: z.boolean().optional(),
+    position: z.number().int().min(0).optional(),
+  })
+  .superRefine((data, ctx) => {
+    if (data.inputType === "select" && (data.options?.length ?? 0) === 0) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["options"],
+        message: "Add at least one option for a dropdown field",
+      });
+    }
+    if (
+      data.inputType === "file" &&
+      (data.allowedFileTypes?.length ?? 0) === 0
+    ) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["allowedFileTypes"],
+        message: "Pick at least one allowed file type",
+      });
+    }
+  });
+export type UpdateRequirementField = z.infer<
+  typeof updateRequirementFieldSchema
+>;
+
+/**
+ * A profession's effective requirement set, grouped by source so the admin UI
+ * (and later the mobile worker flow) can show inherited vs own fields. Each
+ * group is ordered by `position`.
+ */
+export const effectiveRequirementsSchema = z.object({
+  catalog: z.array(requirementFieldSchema),
+  category: z.array(requirementFieldSchema),
+  profession: z.array(requirementFieldSchema),
+});
+export type EffectiveRequirements = z.infer<typeof effectiveRequirementsSchema>;
 
 /** Email used for OTP login. Normalised to lowercase. */
 export const emailSchema = z

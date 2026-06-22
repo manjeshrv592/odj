@@ -5,6 +5,7 @@ import { auth } from "./auth";
 import { env } from "./env";
 import { healthRouter } from "./routes/health";
 import { portalRouter } from "./routes/portal";
+import { catalogRouter } from "./routes/catalog";
 
 /**
  * Build the Express application. Kept separate from server startup so it can be
@@ -30,6 +31,7 @@ export function createApp(): Express {
 
   app.use("/api/health", healthRouter);
   app.use("/api/portal", portalRouter);
+  app.use("/api/portal/catalog", catalogRouter);
 
   app.get("/", (_req: Request, res: Response) => {
     res.json({ name: "odj-backend", status: "ok" });
