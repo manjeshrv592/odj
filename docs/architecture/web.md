@@ -6,7 +6,7 @@ client. Tailwind v4, shadcn/ui, next-themes, TanStack Query, better-auth client.
 ```
 apps/web/
 ├── package.json
-├── next.config.ts          # loads root .env (process.loadEnvFile) + reactCompiler + transpilePackages: ["@odj/shared"]
+├── next.config.ts          # loads root .env (process.loadEnvFile) + reactCompiler + transpilePackages: ["@odj/shared"] + images.remotePatterns (ucarecdn.com)
 ├── components.json         # shadcn config
 ├── tsconfig.json
 └── src/
@@ -22,17 +22,27 @@ apps/web/
     │       ├── layout.tsx  # sidebar shell + server admin guard (+ onboarding redirect)
     │       ├── page.tsx    # "Dashboard" placeholder
     │       ├── portal-users/page.tsx # Portal-users CRUD route
-    │       └── profile/page.tsx # renders <AdminProfile>
+    │       ├── profile/page.tsx # renders <AdminProfile>
+    │       └── catalog/    # catalog drill-down (Catalog → Category → Profession)
+    │           ├── page.tsx                         # <CatalogOverview>
+    │           ├── [categoryId]/page.tsx            # <CategoryDetail> (await params)
+    │           └── [categoryId]/[professionId]/page.tsx # <ProfessionDetail>
     ├── components/
     │   ├── providers.tsx   # QueryClientProvider + next-themes + <Toaster>
     │   ├── theme-toggle.tsx# light/dark toggle (shadcn Button + lucide icons)
     │   ├── health-status.tsx # backend health card (TanStack Query)
-    │   ├── app-sidebar.tsx # admin nav (Dashboard, Portal users, Profile) + sign-out
+    │   ├── app-sidebar.tsx # admin nav (Dashboard, Catalog, Portal users, Profile) + sign-out
     │   ├── portal-users.tsx# Portal-users table + invite/edit/delete dialogs
     │   ├── onboarding-wizard.tsx # 3-step profile-completion wizard (submit once)
     │   ├── admin-profile.tsx # profile page: name/phone/avatar edit + email-change dialog
     │   ├── avatar-uploader.tsx # Uploadcare FileUploaderRegular wrapper (→ CDN url)
-    │   └── ui/             # shadcn components (button, input, input-otp, sidebar, table, dialog, …)
+    │   ├── catalog-overview.tsx # catalog landing: global requirements + categories grid
+    │   ├── category-form-dialog.tsx # create/edit category (+ Uploadcare icon)
+    │   ├── category-detail.tsx # professions list (CRUD/reorder) + category requirements
+    │   ├── profession-detail.tsx # inherited (read-only) + this profession's fields
+    │   ├── requirement-fields-panel.tsx # reusable per-scope requirement-field CRUD
+    │   ├── requirement-field-editor.tsx # add/edit field dialog (type-switched inputs)
+    │   └── ui/             # shadcn components (button, input, select, checkbox, switch, textarea, sidebar, table, dialog, …)
     └── lib/
         ├── utils.ts        # cn() — shadcn class merge
         ├── api.ts          # API_URL + apiFetch() (surfaces backend errors, 204-safe)
@@ -77,6 +87,28 @@ apps/web/
 - `page.tsx` — "Dashboard" placeholder.
 - `portal-users/page.tsx` — renders `<PortalUsers>`.
 - `profile/page.tsx` — renders `<AdminProfile>`.
+- `catalog/page.tsx` — renders `<CatalogOverview>`.
+- `catalog/[categoryId]/page.tsx` — `await params` → `<CategoryDetail>`.
+- `catalog/[categoryId]/[professionId]/page.tsx` — `await params` →
+  `<ProfessionDetail>`.
+
+## Catalog components (admin web only)
+- `catalog-overview.tsx` — Catalog landing: a `level="catalog"` requirement panel
+  ("Global requirements") + a categories grid (icon/name/slug) with create/edit/
+  delete; cards link to the category page.
+- `category-form-dialog.tsx` — create/edit a category; reuses `<AvatarUploader>`
+  for the icon. Validates with `create/updateCategorySchema`.
+- `category-detail.tsx` — professions list (create, rename, hide/show, reorder
+  up/down via `position` swap, delete) + a `level="category"` requirement panel.
+- `profession-detail.tsx` — reads `effective-requirements`; shows **Inherited**
+  fields read-only, grouped "From Catalog" / "From <Category>", above a
+  `level="profession"` requirement panel.
+- `requirement-fields-panel.tsx` — **reusable** CRUD list for one scope (`level` +
+  `categoryId?`/`professionId?`); add/edit/delete/hide/reorder, TanStack Query keyed
+  by scope. Used at all three levels.
+- `requirement-field-editor.tsx` — add/edit dialog; switches inputs by type
+  (Select for type, options editor for `select`, file-type checkboxes for `file`,
+  Required switch). Validates with `create/updateRequirementFieldSchema`.
 
 ## src/components/onboarding-wizard.tsx
 - `OnboardingWizard` (client) — 3 steps (name → phone → optional avatar) held in
@@ -103,8 +135,8 @@ apps/web/
   sonner `<Toaster>`.
 
 ## src/components/app-sidebar.tsx
-- `AppSidebar` (client) — collapsible nav (Dashboard, Portal users, Profile) with
-  active state + sign-out (`signOut` → `/login`).
+- `AppSidebar` (client) — collapsible nav (Dashboard, Catalog, Portal users,
+  Profile) with active state + sign-out (`signOut` → `/login`).
 
 ## src/components/portal-users.tsx
 - `PortalUsers` (client) — TanStack Query list of `/api/portal/users` with

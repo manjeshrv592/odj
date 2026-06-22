@@ -33,8 +33,12 @@ sub-items as scope is refined. `[x]` done · `[~]` in progress · `[ ]` not star
 
 ## 2. Admin — platform configuration
 
-- [ ] Manage working domains/categories (Driver, Bouncer, Maid, …)
-- [ ] Define required documents per domain
+- [x] Manage working domains/categories (Driver, Bouncer, Maid, …) — Catalog →
+  Categories (with icon) → Professions, full CRUD + reorder (admin web)
+- [x] Define required documents per domain — admin-authored requirement fields
+  (text / file-upload / dropdown) at catalog/category/profession levels that
+  **cascade** onto a profession's effective set; file fields pick allowed types
+  (pdf/jpg/jpeg/png). Authoring side only; mobile worker flow reads it later.
 - [x] Admin dashboard shell + auth (admin role) — sidebar shell, root seed,
   Portal-users CRUD (invite/rename/delete admins by email)
 - [x] Admin profile completion (onboarding) — gated 3-step wizard (name, phone,

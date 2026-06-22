@@ -28,7 +28,8 @@ apps/backend/
     │   └── require-admin.ts # admin-only guard (better-auth session + adminRole)
     └── routes/
         ├── health.ts   # liveness + readiness endpoints
-        └── portal.ts   # admin Portal-users CRUD + invite (/api/portal)
+        ├── portal.ts   # admin Portal-users CRUD + invite (/api/portal)
+        └── catalog.ts  # categories/professions/requirement-fields CRUD (/api/portal/catalog)
 ```
 
 ## src/index.ts
@@ -42,7 +43,8 @@ apps/backend/
   - Mounts better-auth **before** `express.json()` at `ALL /api/auth/{*any}`
     (Express 5 named wildcard) via `toNodeHandler(auth)`.
   - `express.json()` for everything else.
-  - `/api/health` router; `/api/portal` router; `GET /` info route.
+  - `/api/health` router; `/api/portal` router; `/api/portal/catalog` router;
+    `GET /` info route.
 
 ## src/env.ts
 - `env` — `parseBackendEnv(process.env)`, parsed once at import (fail-fast).
@@ -97,10 +99,42 @@ apps/backend/
 - `db` — Drizzle client bound to pool + schema.
 - `DB` type; re-exports `schema`.
 
+## src/routes/catalog.ts
+- `catalogRouter` (mounted `/api/portal/catalog`, all routes behind `requireAdmin`).
+  The admin authoring API for the catalog taxonomy + cascading worker requirement
+  fields. Mirrors `portal.ts` (zod validate → `db` → `toX()` projection). Helpers:
+  `pickUnique` (slug/key collision suffixing), `categorySlugs` / `professionSlugs`
+  (scoped slug sets), `scopeWhere` (SQL predicate per requirement level),
+  `requirementKeys` / `nextRequirementPosition`.
+  - **Categories:** `GET /categories`, `POST /categories` (slug auto from name),
+    `GET /categories/:id`, `PATCH /categories/:id` (slug re-derives on rename),
+    `DELETE /categories/:id` (hard delete — cascades to professions + fields).
+  - **Professions:** `GET|POST /categories/:id/professions`,
+    `PATCH /professions/:id` (rename/toggle/reorder via `position`),
+    `DELETE /professions/:id`.
+  - **Requirement fields:** `GET /requirement-fields?level=&categoryId=&professionId=`,
+    `POST /requirement-fields` (generates the stable `key` + position),
+    `PATCH /requirement-fields/:id` (key immutable; type-specific extras kept
+    consistent with the type), `DELETE /requirement-fields/:id`.
+  - **Cascade read:** `GET /professions/:id/effective-requirements` → grouped
+    `{ catalog, category, profession }`, each position-ordered (powers the
+    profession "Inherited" view; reused by mobile later).
+
 ## src/db/schema.ts
 - Re-exports all `auth-schema` tables.
-- `categories` — starter domain table (id uuid, name, slug unique, description,
-  isActive, timestamps). Establishes the Drizzle → drizzle-zod pattern.
+- `categories` — a working domain/category (id, name, slug unique, description,
+  `image` icon CDN url, isActive, timestamps).
+- `professions` — a role under one category (`category_id` FK → categories
+  `ON DELETE CASCADE`, name, slug, isActive, `position`, timestamps). Unique index
+  on `(category_id, slug)`; index on `category_id`.
+- `requirementLevel` / `requirementInputType` — pgEnums.
+- `requirement_fields` — admin-authored worker questions for all three levels in
+  one table: `level` enum, nullable `category_id` / `profession_id` FKs (both
+  `ON DELETE CASCADE`; both null ⇒ catalog level), stable `key`, label, `input_type`,
+  required, `options` jsonb (select), `allowed_file_types` jsonb (file), position,
+  isActive, timestamps. Indexed on `category_id` and `profession_id`.
+- Migrations `0003_*` adds `categories.image`, the two enums, and the `professions`
+  + `requirement_fields` tables.
 
 ## src/db/auth-schema.ts
 - better-auth Drizzle tables: `user`, `session`, `account`, `verification`.

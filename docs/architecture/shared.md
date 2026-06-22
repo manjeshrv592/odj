@@ -38,8 +38,29 @@ packages/shared/
   alias of the same.
 - `adminRoleSchema` / `AdminRole` — `"root" | "admin"` (web-portal sub-role).
 - `approvalStatusSchema` / `ApprovalStatus` — `"pending" | "approved" | "rejected"`.
-- `categorySchema` / `Category` — working domain/category shape (id, name, slug,
-  description?, isActive). `createCategorySchema` / `CreateCategory` — omit id.
+- `slugify(name)` — pure, dependency-free kebab-case slug helper (strips accents,
+  lowercases, non-alnum → `-`). Backend layers uniqueness (`-2`, `-3`, …) on top.
+- **Catalog taxonomy** (admin-authored; backend `catalog.ts` owns CRUD):
+  - `categorySchema` / `Category` — a category (id, name, slug, description?,
+    image? icon CDN url, isActive). `createCategorySchema` (name, description?,
+    image? — slug auto) / `updateCategorySchema` (all optional, slug re-derives on
+    rename).
+  - `professionSchema` / `Profession` — a role under one category (id, categoryId,
+    name, slug, isActive, position). `createProfessionSchema` (name only) /
+    `updateProfessionSchema` (name?, isActive?, position? for reorder).
+- **Requirement fields** (cascading worker questions):
+  - `requirementLevelSchema` (`catalog|category|profession`),
+    `requirementInputTypeSchema` (`text|file|select`), `allowedFileTypeSchema`
+    (`pdf|jpg|jpeg|png`), `requirementOptionSchema` (`{value,label}`).
+  - `requirementFieldSchema` / `RequirementField` — a field (id, level,
+    categoryId?, professionId?, stable immutable `key`, label, inputType, required,
+    options? for select, allowedFileTypes? for file, position, isActive).
+  - `createRequirementFieldSchema` / `updateRequirementFieldSchema` — `superRefine`
+    rules: select ⇒ ≥1 option, file ⇒ ≥1 file type, level must match target id
+    (catalog→none, category→categoryId, profession→professionId). `key` is never
+    in the update shape (immutable, so future worker answers stay mapped).
+  - `effectiveRequirementsSchema` / `EffectiveRequirements` — a profession's
+    cascaded set grouped `{ catalog, category, profession }`, each position-ordered.
 - `emailSchema` — email, normalised to lowercase/trimmed.
 - `otpSchema` — 6-digit OTP string.
 - `phoneSchema` — lenient stored phone (`+`/digits/spaces/()-, 7–20 chars; no SMS

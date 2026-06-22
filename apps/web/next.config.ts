@@ -15,6 +15,10 @@ const nextConfig: NextConfig = {
   reactCompiler: true,
   // @odj/shared is shipped as TypeScript source; Next must transpile it.
   transpilePackages: ["@odj/shared"],
+  images: {
+    // Uploadcare CDN — avatars + category icons are served from here.
+    remotePatterns: [{ protocol: "https", hostname: "ucarecdn.com" }],
+  },
 };
 
 export default nextConfig;
