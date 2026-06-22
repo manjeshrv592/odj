@@ -8,7 +8,7 @@ export default function HomeScreen() {
     <SafeAreaView className="flex-1 bg-background">
       <View className="flex-1 items-center justify-center gap-6 p-6">
         <View className="items-center">
-          <Text className="text-3xl font-bold text-foreground">
+          <Text className="text-3xl font-poppins-semibold text-foreground">
             ODJ mobile app
           </Text>
           <Text className="mt-1 text-muted-foreground">

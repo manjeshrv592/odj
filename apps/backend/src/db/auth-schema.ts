@@ -14,6 +14,8 @@ import {
  *
  * NOTE: This file mirrors `@better-auth/cli generate` output. If the better-auth
  * version changes, re-run `pnpm --filter @odj/backend auth:generate` to refresh.
+ * The `userType` / `adminRole` / `onboardingCompleted` columns correspond to the
+ * `user.additionalFields` declared in `src/auth/index.ts` (ODJ identity model).
  */
 
 export const user = pgTable("user", {
@@ -24,6 +26,12 @@ export const user = pgTable("user", {
     .$defaultFn(() => false)
     .notNull(),
   image: text("image"),
+  // ── ODJ additional fields (see src/auth/index.ts) ──
+  userType: text("user_type"),
+  adminRole: text("admin_role"),
+  onboardingCompleted: boolean("onboarding_completed")
+    .$defaultFn(() => false)
+    .notNull(),
   createdAt: timestamp("created_at")
     .$defaultFn(() => new Date())
     .notNull(),

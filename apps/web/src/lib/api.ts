@@ -16,7 +16,14 @@ export async function apiFetch<T>(
     ...init,
   });
   if (!res.ok) {
-    throw new Error(`Request failed: ${res.status} ${res.statusText}`);
+    // Surface the backend's `{ error }` message when present.
+    const message = await res
+      .json()
+      .then((b: { error?: string }) => b?.error)
+      .catch(() => undefined);
+    throw new Error(message ?? `Request failed: ${res.status} ${res.statusText}`);
   }
+  // 204 No Content (e.g. DELETE) has no body to parse.
+  if (res.status === 204) return undefined as T;
   return (await res.json()) as T;
 }

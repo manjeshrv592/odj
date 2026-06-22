@@ -18,7 +18,7 @@ packages/shared/
 ## src/env.ts
 
 - `backendEnvSchema` — zod object for all backend env vars (PORT, DATABASE_URL,
-  BETTER_AUTH_*, RESEND_*, WEB_ORIGIN, MOBILE_SCHEME, NODE_ENV).
+  BETTER_AUTH_*, RESEND_*, WEB_ORIGIN, MOBILE_SCHEME, NODE_ENV, ROOT_USER_EMAIL).
 - `BackendEnv` — inferred type.
 - `parseBackendEnv(env)` — validates `process.env`; throws a readable, aggregated
   error listing every missing/invalid var. Node-type-free (stays runtime-agnostic).
@@ -33,12 +33,19 @@ packages/shared/
 
 ## src/domain.ts
 
-- `userRoleSchema` / `UserRole` — `"worker" | "hirer" | "admin"`.
+- `userTypeSchema` / `UserType` — `"worker" | "hirer" | "admin"` (marketplace
+  identity; stored on `user.userType`). `userRoleSchema` / `UserRole` — back-compat
+  alias of the same.
+- `adminRoleSchema` / `AdminRole` — `"root" | "admin"` (web-portal sub-role).
 - `approvalStatusSchema` / `ApprovalStatus` — `"pending" | "approved" | "rejected"`.
 - `categorySchema` / `Category` — working domain/category shape (id, name, slug,
   description?, isActive). `createCategorySchema` / `CreateCategory` — omit id.
 - `emailSchema` — email, normalised to lowercase/trimmed.
 - `otpSchema` — 6-digit OTP string.
+- `sessionUserSchema` / `SessionUser` — app-facing user projection (id, email,
+  name, emailVerified, image?, userType?, adminRole?, onboardingCompleted).
+- `inviteAdminSchema` / `InviteAdmin` — `{ email }` (admin invite input).
+- `portalUserSchema` / `PortalUser` — admin row for the Portal-users table.
 
 > Grows as features land. Prefer generating DB-owned shapes via `drizzle-zod`
 > (in backend) and re-exporting refined schemas here.

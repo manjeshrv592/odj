@@ -22,6 +22,7 @@ shared conventions; each package file holds its own file/function/component map.
 | `@odj/backend` | `apps/backend`  | Express API + better-auth server + Drizzle/PostgreSQL | [backend.md](./architecture/backend.md) |
 | `@odj/web`     | `apps/web`      | Next.js admin + web client (shadcn, next-themes)      | [web.md](./architecture/web.md) |
 | `@odj/mobile`  | `apps/mobile`   | Expo app for workers & hirers (NativeWind, reusables) | [mobile.md](./architecture/mobile.md) |
+| _design system_ | _web + mobile_ | shared visual language: fonts, colors, radius, primitives | [styling.md](./architecture/styling.md) |
 
 ## How things connect
 
@@ -56,6 +57,10 @@ shared conventions; each package file holds its own file/function/component map.
 - **Theming:** light/dark in both clients. Web = `next-themes` (class strategy);
   mobile = NativeWind `colorScheme` wrapped in a Context, persisted in
   secure-store.
+- **Design system:** one brand font (**Poppins**) + one primary (**blue**),
+  shared across web + mobile via design tokens. Full spec in
+  [architecture/styling.md](./architecture/styling.md); change tokens there, not
+  per element.
 - **Auth:** one better-auth server (backend). Clients use `better-auth/react`
   (web) and `better-auth/react` + `@better-auth/expo` (mobile). Email OTP only.
 - **Env:** validated via `@odj/shared` `parseBackendEnv`. Public env vars are

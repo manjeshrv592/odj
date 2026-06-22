@@ -13,25 +13,30 @@ sub-items as scope is refined. `[x]` done · `[~]` in progress · `[ ]` not star
 - [x] Web: Next.js + Tailwind v4 + shadcn + next-themes + TanStack Query; shows "ODJ web app"
 - [x] Mobile: Expo + expo-router + NativeWind + TanStack Query; shows "ODJ mobile app"
 - [x] Dark/light theme on web (next-themes) and mobile (NativeWind + Context)
+- [x] Design system: Poppins brand font + single blue primary, shared tokens &
+  reusable primitives across web + mobile ([styling.md](./architecture/styling.md))
 - [x] Project docs: CLAUDE.md, ARCHITECTURE + per-package, FEATURES
 - [x] Database `odj` created + migrations applied + health verified (`/api/health/db` → connected)
 - [x] Email: Resend domain `sigtest.website` verified; real test send confirmed (sender `no-reply@sigtest.website`)
 
 ## 1. Authentication & onboarding
 
-- [ ] Email OTP login UI — web
-- [ ] Email OTP login UI — mobile
+- [x] Email OTP login UI — web (admin portal; invite-only)
+- [x] Email OTP login UI — mobile (worker/hirer; phone stubbed)
 - [ ] SMS OTP login (future — needs DLT setup)
-- [ ] Role selection at signup (worker / hirer)
+- [~] Role selection at signup (worker / hirer) — mobile "Continue as" screen is
+  stubbed; persistence + profile is the next feature
 - [ ] Worker profile creation
 - [ ] Hirer profile creation
-- [ ] Session management / protected routes (web + mobile)
+- [x] Session management / protected routes (web `proxy.ts` + RSC guard; mobile
+  `SessionGate`); admin API guarded by `requireAdmin`
 
 ## 2. Admin — platform configuration
 
 - [ ] Manage working domains/categories (Driver, Bouncer, Maid, …)
 - [ ] Define required documents per domain
-- [ ] Admin dashboard shell + auth (admin role)
+- [x] Admin dashboard shell + auth (admin role) — sidebar shell, root seed,
+  Portal-users CRUD (invite/rename/delete admins by email)
 - [ ] Dashboard analytics with shadcn charts
 
 ## 3. Admin — approvals
