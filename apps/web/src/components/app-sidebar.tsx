@@ -2,8 +2,17 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { LayoutDashboard, Users, CircleUser, Boxes, LogOut } from "lucide-react";
+import { useQuery } from "@tanstack/react-query";
+import {
+  LayoutDashboard,
+  Users,
+  CircleUser,
+  Boxes,
+  BadgeCheck,
+  LogOut,
+} from "lucide-react";
 import { signOut } from "@/lib/auth-client";
+import { apiFetch } from "@/lib/api";
 import {
   Sidebar,
   SidebarContent,
@@ -12,13 +21,17 @@ import {
   SidebarGroupContent,
   SidebarHeader,
   SidebarMenu,
+  SidebarMenuBadge,
   SidebarMenuButton,
   SidebarMenuItem,
 } from "@/components/ui/sidebar";
 
+export const VERIFICATIONS_COUNT_KEY = ["verifications-count"] as const;
+
 const NAV = [
   { title: "Dashboard", href: "/", icon: LayoutDashboard },
   { title: "Catalog", href: "/catalog", icon: Boxes },
+  { title: "Verifications", href: "/verifications", icon: BadgeCheck },
   { title: "Portal users", href: "/portal-users", icon: Users },
   { title: "Profile", href: "/profile", icon: CircleUser },
 ] as const;
@@ -27,6 +40,17 @@ const NAV = [
 export function AppSidebar({ email }: { email: string }) {
   const pathname = usePathname();
   const router = useRouter();
+
+  // Pending-verification count for the nav badge; polled so admins don't miss new
+  // submissions (no websockets).
+  const { data: pending } = useQuery({
+    queryKey: VERIFICATIONS_COUNT_KEY,
+    queryFn: () =>
+      apiFetch<{ pending: number }>("/api/portal/verifications/count").then(
+        (r) => r.pending,
+      ),
+    refetchInterval: 30_000,
+  });
 
   async function handleSignOut() {
     await signOut();
@@ -62,6 +86,9 @@ export function AppSidebar({ email }: { email: string }) {
                       <item.icon />
                       <span>{item.title}</span>
                     </SidebarMenuButton>
+                    {item.href === "/verifications" && pending ? (
+                      <SidebarMenuBadge>{pending}</SidebarMenuBadge>
+                    ) : null}
                   </SidebarMenuItem>
                 );
               })}

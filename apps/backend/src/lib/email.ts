@@ -109,6 +109,84 @@ export async function sendAdminInviteEmail(params: {
 }
 
 /**
+ * Tell a worker/hirer their profile passed verification. Sent on admin approve.
+ */
+export async function sendProfileApprovedEmail(params: {
+  email: string;
+  name: string;
+}): Promise<void> {
+  const { email, name } = params;
+  const subject = "Your ODJ profile is verified 🎉";
+  const greeting = name?.trim() ? `Hi ${name},` : "Hi,";
+
+  const html = emailShell({
+    heading: "You're verified on ODJ",
+    body: `
+      <p style="margin:0 0 16px;font-size:14px;line-height:1.6;color:#3f3f46;">${greeting}</p>
+      <p style="margin:0 0 20px;font-size:14px;line-height:1.6;color:#3f3f46;">
+        Good news — your ${BRAND} profile has been reviewed and <strong>approved</strong>.
+        You can now open the app and get started.
+      </p>`,
+  });
+  const text = `${greeting}\n\nYour ${BRAND} profile has been approved. Open the app to get started.`;
+
+  await send({
+    to: email,
+    subject,
+    html,
+    text,
+    devLabel: `Profile approved for ${email}`,
+  });
+}
+
+/**
+ * Tell a worker/hirer their profile was rejected and why. Sent on admin reject;
+ * the reason is shown verbatim and the user can fix + re-submit in the app.
+ */
+export async function sendProfileRejectedEmail(params: {
+  email: string;
+  name: string;
+  reason: string;
+}): Promise<void> {
+  const { email, name, reason } = params;
+  const subject = "Action needed on your ODJ profile";
+  const greeting = name?.trim() ? `Hi ${name},` : "Hi,";
+  const safeReason = escapeHtml(reason);
+
+  const html = emailShell({
+    heading: "Your ODJ profile needs an update",
+    body: `
+      <p style="margin:0 0 16px;font-size:14px;line-height:1.6;color:#3f3f46;">${greeting}</p>
+      <p style="margin:0 0 12px;font-size:14px;line-height:1.6;color:#3f3f46;">
+        We reviewed your ${BRAND} profile and need a few changes before we can
+        approve it:
+      </p>
+      <div style="margin:0 0 20px;padding:12px 16px;background:#f4f4f5;border-radius:8px;border-left:3px solid ${BRAND_COLOR};font-size:14px;line-height:1.6;color:#18181b;white-space:pre-wrap;">${safeReason}</div>
+      <p style="margin:0;font-size:14px;line-height:1.6;color:#3f3f46;">
+        Open the app, update your details, and re-submit for verification.
+      </p>`,
+  });
+  const text = `${greeting}\n\nYour ${BRAND} profile needs changes before approval:\n\n${reason}\n\nOpen the app to update and re-submit.`;
+
+  await send({
+    to: email,
+    subject,
+    html,
+    text,
+    devLabel: `Profile rejected for ${email}: ${reason}`,
+  });
+}
+
+/** Escape user-supplied text before embedding in HTML email markup. */
+function escapeHtml(s: string): string {
+  return s
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+/**
  * Low-level Resend send with the shared dev fallback: in non-production, a Resend
  * failure (e.g. unverified domain) logs `devLabel` instead of throwing, keeping
  * local flows testable. In production, errors propagate.

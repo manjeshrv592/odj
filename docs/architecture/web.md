@@ -23,6 +23,9 @@ apps/web/
     │       ├── page.tsx    # "Dashboard" placeholder
     │       ├── portal-users/page.tsx # Portal-users CRUD route
     │       ├── profile/page.tsx # renders <AdminProfile>
+    │       ├── verifications/  # admin approve/reject queue
+    │       │   ├── page.tsx               # <VerificationsList>
+    │       │   └── [type]/[id]/page.tsx   # <VerificationDetail> (await params)
     │       └── catalog/    # catalog drill-down (Catalog → Category → Profession)
     │           ├── page.tsx                         # <CatalogOverview>
     │           ├── [categoryId]/page.tsx            # <CategoryDetail> (await params)
@@ -31,7 +34,9 @@ apps/web/
     │   ├── providers.tsx   # QueryClientProvider + next-themes + <Toaster>
     │   ├── theme-toggle.tsx# light/dark toggle (shadcn Button + lucide icons)
     │   ├── health-status.tsx # backend health card (TanStack Query)
-    │   ├── app-sidebar.tsx # admin nav (Dashboard, Catalog, Portal users, Profile) + sign-out
+    │   ├── app-sidebar.tsx # admin nav (Dashboard, Catalog, Verifications+badge, Portal users, Profile) + sign-out
+    │   ├── verifications-list.tsx # verification queue table + type/status filters
+    │   ├── verification-detail.tsx # full profile + doc lightbox + approve/reject
     │   ├── portal-users.tsx# Portal-users table + invite/edit/delete dialogs
     │   ├── onboarding-wizard.tsx # 3-step profile-completion wizard (submit once)
     │   ├── admin-profile.tsx # profile page: name/phone/avatar edit + email-change dialog
@@ -135,8 +140,24 @@ apps/web/
   sonner `<Toaster>`.
 
 ## src/components/app-sidebar.tsx
-- `AppSidebar` (client) — collapsible nav (Dashboard, Catalog, Portal users,
-  Profile) with active state + sign-out (`signOut` → `/login`).
+- `AppSidebar` (client) — collapsible nav (Dashboard, Catalog, Verifications,
+  Portal users, Profile) with active state + sign-out (`signOut` → `/login`). The
+  Verifications row shows a `SidebarMenuBadge` with the pending count, polled every
+  30s via TanStack Query (`VERIFICATIONS_COUNT_KEY`, exported for invalidation).
+
+## src/components/verifications-list.tsx
+- `VerificationsList` (client) — admin verification queue. Type filter
+  (All/Workers/Hirers) + status filter (Pending default/Approved/Rejected/All) via
+  shadcn `Select`; a `Table` of rows (avatar, name, type badge, location, status,
+  submitted date) linking to the detail page. Polls every 30s.
+
+## src/components/verification-detail.tsx
+- `VerificationDetail` (client) — full profile for `{type,id}`: header (photo, name,
+  email, status), basics, worker skills/languages + requirement answers (file
+  answers open a `Dialog` document lightbox via `<iframe>` + open-in-new-tab), hirer
+  business/GST, and a decision banner for already-reviewed profiles. Approve button +
+  Reject (`Dialog` with a required reason `Textarea`); `sonner` toasts; on success
+  invalidates the queue + `VERIFICATIONS_COUNT_KEY` and routes back to the list.
 
 ## src/components/portal-users.tsx
 - `PortalUsers` (client) — TanStack Query list of `/api/portal/users` with

@@ -23,7 +23,10 @@ apps/backend/
     │   ├── auth-schema.ts # better-auth tables (+ ODJ user fields)
     │   └── seed-root.ts   # idempotent root-admin seed (from ROOT_USER_EMAIL)
     ├── lib/
-    │   └── email.ts    # Resend HTML emails: OTP + admin invite
+    │   ├── email.ts    # Resend HTML emails: OTP + admin invite + verification decisions
+    │   ├── push.ts     # Expo Push API sender (no dep; best-effort)
+    │   ├── notifications.ts # in-app notification + push fan-out helpers
+    │   └── requirements.ts  # cascading effective requirement fields (shared helper)
     ├── middleware/
     │   ├── require-admin.ts # admin-only guard (better-auth session + adminRole)
     │   └── require-user.ts  # mobile (worker/hirer) guard — session, rejects admins
@@ -31,7 +34,8 @@ apps/backend/
         ├── health.ts   # liveness + readiness endpoints
         ├── portal.ts   # admin Portal-users CRUD + invite (/api/portal)
         ├── catalog.ts  # categories/professions/requirement-fields CRUD (/api/portal/catalog)
-        └── app.ts      # mobile worker/hirer onboarding API (/api/app)
+        ├── verifications.ts # admin approve/reject queue (/api/portal/verifications)
+        └── app.ts      # mobile worker/hirer onboarding + push/notifications API (/api/app)
 ```
 
 ## src/index.ts
@@ -46,7 +50,7 @@ apps/backend/
     (Express 5 named wildcard) via `toNodeHandler(auth)`.
   - `express.json()` for everything else.
   - `/api/health` router; `/api/portal` router; `/api/portal/catalog` router;
-    `/api/app` router; `GET /` info route.
+    `/api/portal/verifications` router; `/api/app` router; `GET /` info route.
   - Note: `cors` only allows `WEB_ORIGIN`. Native RN fetch isn't CORS-bound (the
     app sends the session cookie directly), so `/api/app` needs no origin change;
     only the Expo **web** preview would be blocked.
@@ -92,10 +96,11 @@ apps/backend/
 ## src/routes/app.ts
 - `appRouter` (mounted `/api/app`, all routes behind `requireUser`). The mobile
   worker/hirer onboarding API; mirrors `catalog.ts` (zod validate → `db` →
-  projection). Helpers: `effectiveFieldsForProfessions` (active catalog+category+
-  profession requirement fields, unioned & de-duped by stable `key`),
-  `loadWorkerProfile` / `loadHirerProfile` / `loadOnboardingState` (GET-shaping),
-  `requireDraftWorker` / `requireDraftHirer` (owner + editable-status guard).
+  projection). Uses `effectiveFieldsForProfessions` from `lib/requirements.ts`.
+  Helpers: `loadWorkerProfile` / `loadHirerProfile` (now include `rejectionReason`)
+  / `loadOnboardingState` (GET-shaping), `requireEditableWorker` /
+  `requireEditableHirer` (owner guard that allows `draft` **or** `rejected` — the
+  latter re-enables edits for re-submission; `under_review`/`approved` are locked).
   - **Catalog reads (active only):** `GET /catalog/categories`,
     `GET /catalog/categories/:id/professions`,
     `GET /catalog/effective-requirements?professionIds=a,b,c` → `{ fields }`.
@@ -106,9 +111,13 @@ apps/backend/
   - **Worker draft:** `PATCH /worker-profile` (partial per-step save + `currentStep`),
     `PUT /worker-profile/professions` (replace the join rows),
     `POST /worker-profile/submit` (validate static fields + ≥1 profession + required
-    requirement answers → `under_review`).
+    requirement answers → `under_review`; on re-submit clears
+    `rejectionReason`/`reviewedAt`/`reviewedBy`).
   - **Hirer draft:** `PATCH /hirer-profile`, `POST /hirer-profile/submit`
-    (validate static fields + business/GST rules → `under_review`).
+    (validate static fields + business/GST rules → `under_review`; same clear).
+  - **Push + notifications:** `POST /push-tokens` (upsert this device's Expo token
+    by `token`), `GET /notifications` (newest first), `POST /notifications/:id/read`,
+    `POST /notifications/read-all`.
 
 ## src/routes/portal.ts
 - `portalRouter` (mounted `/api/portal`, all routes behind `requireAdmin`):
@@ -153,6 +162,44 @@ apps/backend/
     `{ catalog, category, profession }`, each position-ordered (powers the
     profession "Inherited" view; reused by mobile later).
 
+## src/routes/verifications.ts
+- `verificationsRouter` (mounted `/api/portal/verifications`, behind `requireAdmin`).
+  Admin profile-verification queue + decisions. Helpers: `parseStatusFilter` /
+  `parseTypeFilter`, `displayName`, `loadProfile`, `applicantContact`, `reviewerName`.
+  - `GET /?type=worker|hirer|all&status=under_review|approved|rejected|all` →
+    `{ verifications: VerificationListItem[] }` (joined to `user` for name/email,
+    newest `submittedAt` first; default type `all`, status `under_review`).
+  - `GET /count` → `{ pending }` = `under_review` total across both tables (sidebar
+    badge).
+  - `GET /:type/:id` → `VerificationDetail`. Worker answers are resolved against
+    `effectiveFieldsForProfessions` (stored `key` → `{label,inputType,value}`; a
+    since-removed field is surfaced with `resolved:false`); language codes → labels.
+  - `POST /:type/:id/approve` / `POST /:type/:id/reject` `{ reason }` — only from
+    `under_review` (409 otherwise); set status + `reviewedAt`/`reviewedBy`
+    (+`rejectionReason`), then email (`sendProfileApproved/RejectedEmail`) +
+    `notifyUser` (in-app + Expo push).
+
+## src/lib/requirements.ts
+- `toRequirementField(row)` — project a `requirement_fields` row to the shared shape.
+- `effectiveFieldsForProfessions(professionIds)` — active catalog+category+profession
+  requirement fields, unioned & de-duped by stable `key` (catalog→category→profession,
+  then position). Shared by `routes/app.ts` (onboarding) and `routes/verifications.ts`
+  (answer-label resolution). Extracted from the old local copy in `app.ts`.
+
+## src/lib/push.ts
+- `sendExpoPush(tokens, { title, body, data? })` — POSTs to the Expo Push API
+  (`https://exp.host/--/api/v2/push/send`, chunked at 100; skips non-`Expo…PushToken`
+  strings). No dependency; best-effort (logs, never throws).
+- **Dormant seam:** mobile push registration is currently deferred (no dev build),
+  so `push_tokens` stays empty and `notifyUser` → `sendExpoPush` is a no-op. The
+  `POST /api/app/push-tokens` endpoint + this sender are ready for when a mobile dev
+  build re-adds token registration. The in-app `notifications` path works regardless.
+
+## src/lib/notifications.ts
+- `createNotification(userId, input)` — persist one in-app `notifications` row.
+- `notifyUser(userId, input)` — create the row **and** push to the user's registered
+  `push_tokens` (via `sendExpoPush`). Email is sent separately by the caller.
+
 ## src/db/schema.ts
 - Re-exports all `auth-schema` tables.
 - `categories` — a working domain/category (id, name, slug unique, description,
@@ -172,14 +219,22 @@ apps/backend/
 - `worker_profiles` — one per user (`user_id` unique FK → user, cascade): names,
   `photo_url`, city/state, `lat`/`lng` (double precision), `languages` jsonb,
   `answers` jsonb (`Record<key, string|string[]>`), `status` (`profile_status`,
-  default `draft`), `current_step`, `submitted_at`, timestamps.
+  default `draft`), `current_step`, `submitted_at`, plus the verification columns
+  `rejection_reason`, `reviewed_at`, `reviewed_by` (FK → user, `ON DELETE SET NULL`),
+  timestamps.
 - `worker_professions` — worker↔profession join (composite PK
   `(worker_profile_id, profession_id)`, both FKs cascade; index on profession).
 - `hirer_profiles` — one per user: names, `photo_url`, city/state/lat/lng,
   `hirer_type`, `org_name`, `org_type`, `gst_registered`, `gstin`, `status`,
-  `current_step`, `submitted_at`, timestamps.
+  `current_step`, `submitted_at`, the same `rejection_reason`/`reviewed_at`/
+  `reviewed_by` columns, timestamps.
+- `push_tokens` — Expo push tokens per device (`user_id` FK cascade, `token` unique,
+  `platform`, timestamps; index on user). Re-register re-points a token at the user.
+- `notifications` — in-app notifications (`user_id` FK cascade, `type`, `title`,
+  `body`, optional `data` jsonb, `read`, `created_at`; index on user).
 - Migration `0004_*` adds the three enums + `worker_profiles` /
-  `worker_professions` / `hirer_profiles` tables.
+  `worker_professions` / `hirer_profiles` tables. Migration `0005_*` adds the
+  verification columns + `push_tokens` / `notifications` tables.
 
 ## src/db/auth-schema.ts
 - better-auth Drizzle tables: `user`, `session`, `account`, `verification`.
@@ -193,6 +248,9 @@ apps/backend/
   fallback) via Resend.
 - `sendAdminInviteEmail({ email, inviteUrl })` — branded admin invite/welcome
   email with a CTA to `WEB_ORIGIN/login?invited=<email>`.
+- `sendProfileApprovedEmail({ email, name })` — verification-approved email.
+- `sendProfileRejectedEmail({ email, name, reason })` — rejection email; the reason
+  is HTML-escaped (`escapeHtml`) and shown verbatim with a fix-&-re-submit CTA.
 - Internal `emailShell()` (shared header/footer markup) + `send()` (Resend call
   with the non-prod dev fallback: logs instead of throwing when Resend fails).
 

@@ -96,6 +96,23 @@ packages/shared/
   - `onboardingStateSchema` / `OnboardingState` — GET `/api/app/me` shape
     (`userType`, `status`, `currentStep`, `worker?`, `hirer?`) that the mobile
     SessionGate routes on and the wizard hydrates from.
+  - `workerProfileSchema` / `hirerProfileSchema` also carry `rejectionReason` (shown
+    on the mobile rejected screen).
+- **Admin verification (approve/reject):**
+  - `profileKindSchema` / `ProfileKind` — `worker | hirer`.
+  - `rejectProfileSchema` — `{ reason }` (required, 1–1000 chars).
+  - `verificationListItemSchema` / `VerificationListItem` — a queue row (id, type,
+    userId, name, city?, state?, photoUrl?, status, submittedAt?).
+  - `verificationAnswerSchema` / `VerificationAnswer` — one resolved requirement
+    answer (`key`, `label?`, `inputType?`, `value`, `resolved`).
+  - `verificationDetailSchema` / `VerificationDetail` — full admin detail: fixed
+    fields + `email`, worker `professions`/`languages`/`answers`, hirer business/GST,
+    and the reviewer audit (`reviewedAt`, `reviewedByName`, `rejectionReason`).
+- **In-app notifications + push:**
+  - `notificationTypeSchema` / `NotificationType` — `profile_approved | profile_rejected`
+    (extensible).
+  - `notificationSchema` / `Notification` — id, type, title, body, read, createdAt, data?.
+  - `registerPushTokenSchema` / `RegisterPushToken` — `{ token, platform? }`.
 
 > Grows as features land. Prefer generating DB-owned shapes via `drizzle-zod`
 > (in backend) and re-exporting refined schemas here.

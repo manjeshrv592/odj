@@ -24,7 +24,8 @@ import { useOnboardingState } from "@/lib/use-onboarding";
  * - unauthenticated              → (auth)/login
  * - authed, no role picked       → (auth)/continue ("Continue as")
  * - authed, draft profile        → (onboarding)/{worker|hirer} (resumes at step)
- * - authed, submitted/rejected   → (onboarding)/under-review
+ * - authed, under_review         → (onboarding)/under-review
+ * - authed, rejected             → (onboarding)/rejected (reason + re-submit)
  * - authed, approved             → index (full app — later)
  *
  * Routing is driven by the profile `status`, not the legacy `onboardingCompleted`
@@ -63,7 +64,17 @@ function SessionGate({ children }: { children: React.ReactNode }) {
       return;
     }
 
-    if (state.status === "under_review" || state.status === "rejected") {
+    if (state.status === "rejected") {
+      // Allow the rejected screen and the consolidated edit screens (re-submit
+      // flow); bounce anything else back to the rejection notice.
+      const allowed = ["rejected", "edit-worker", "edit-hirer"];
+      if (!allowed.includes(seg[1] ?? "")) {
+        router.replace("/(onboarding)/rejected");
+      }
+      return;
+    }
+
+    if (state.status === "under_review") {
       if (seg[1] !== "under-review")
         router.replace("/(onboarding)/under-review");
       return;

@@ -79,6 +79,9 @@ sign-in.
    then add once approved. (Approved beyond the original brief: `turbo`,
    `next-themes`, Drizzle stack, NativeWind, react-native-reusables, and the
    stack's mandatory companion deps — see `plan` / `docs/ARCHITECTURE.md`.)
+   (Mobile push via `expo-notifications` is **deferred** — Expo Go dropped remote
+   push in SDK 53, so it needs an EAS dev build; the backend Expo-Push-API seam
+   exists but the mobile client isn't wired up. Verification uses email + in-app.)
 2. **No Redux/Zustand.** State = TanStack Query (server) + Context (UI).
 3. **Reference up-to-date docs.** React Native/Expo and Next.js ship versioned
    docs; their APIs (auth, routing) have changed. Before writing framework code,

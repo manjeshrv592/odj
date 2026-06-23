@@ -1,5 +1,5 @@
 import { Router, type Request, type Response } from "express";
-import { and, asc, eq, inArray, isNull } from "drizzle-orm";
+import { and, asc, desc, eq, inArray } from "drizzle-orm";
 import {
   selectRoleSchema,
   workerProfileUpdateSchema,
@@ -7,24 +7,28 @@ import {
   workerSubmitSchema,
   hirerProfileUpdateSchema,
   hirerSubmitSchema,
+  registerPushTokenSchema,
+  notificationTypeSchema,
   type Category,
   type Profession,
-  type RequirementField,
   type WorkerProfile,
   type HirerProfile,
   type OnboardingState,
+  type Notification,
 } from "@odj/shared";
 import { db } from "../db";
 import {
   categories,
   professions,
-  requirementFields,
   workerProfiles,
   workerProfessions,
   hirerProfiles,
+  pushTokens,
+  notifications,
   user,
 } from "../db/schema";
 import { requireUser } from "../middleware/require-user";
+import { effectiveFieldsForProfessions } from "../lib/requirements";
 
 /**
  * Mobile app API for workers & hirers. Authenticated (`requireUser`, non-admin)
@@ -61,107 +65,11 @@ function toProfession(row: typeof professions.$inferSelect): Profession {
   };
 }
 
-function toRequirementField(
-  row: typeof requirementFields.$inferSelect,
-): RequirementField {
-  return {
-    id: row.id,
-    level: row.level,
-    categoryId: row.categoryId,
-    professionId: row.professionId,
-    key: row.key,
-    label: row.label,
-    inputType: row.inputType,
-    required: row.required,
-    options: row.options,
-    allowedFileTypes: row.allowedFileTypes,
-    position: row.position,
-    isActive: row.isActive,
-  };
-}
-
 function invalid(res: Response, error: unknown): void {
   res.status(400).json({
     error: "Invalid input",
     issues: (error as { issues?: unknown }).issues,
   });
-}
-
-// ── Effective requirement fields (active, unioned & de-duped by key) ──────────
-
-const fieldOrder = [
-  asc(requirementFields.position),
-  asc(requirementFields.createdAt),
-] as const;
-
-/**
- * The cascaded requirement fields a worker must answer for the given
- * professions: catalog-level (all workers) + the professions' categories +
- * the professions themselves. Active fields only, ordered catalog → category →
- * profession (then by position), de-duped by stable `key` (first/most-general
- * wins) so a worker is never asked the same thing twice.
- */
-async function effectiveFieldsForProfessions(
-  professionIds: string[],
-): Promise<RequirementField[]> {
-  const profs = professionIds.length
-    ? await db
-        .select()
-        .from(professions)
-        .where(
-          and(
-            inArray(professions.id, professionIds),
-            eq(professions.isActive, true),
-          ),
-        )
-    : [];
-  const categoryIds = [...new Set(profs.map((p) => p.categoryId))];
-  const profIds = profs.map((p) => p.id);
-
-  const [catalog, category, own] = await Promise.all([
-    db
-      .select()
-      .from(requirementFields)
-      .where(
-        and(
-          eq(requirementFields.level, "catalog"),
-          isNull(requirementFields.categoryId),
-          isNull(requirementFields.professionId),
-          eq(requirementFields.isActive, true),
-        ),
-      )
-      .orderBy(...fieldOrder),
-    categoryIds.length
-      ? db
-          .select()
-          .from(requirementFields)
-          .where(
-            and(
-              inArray(requirementFields.categoryId, categoryIds),
-              eq(requirementFields.isActive, true),
-            ),
-          )
-          .orderBy(...fieldOrder)
-      : Promise.resolve([]),
-    profIds.length
-      ? db
-          .select()
-          .from(requirementFields)
-          .where(
-            and(
-              inArray(requirementFields.professionId, profIds),
-              eq(requirementFields.isActive, true),
-            ),
-          )
-          .orderBy(...fieldOrder)
-      : Promise.resolve([]),
-  ]);
-
-  const byKey = new Map<string, RequirementField>();
-  for (const row of [...catalog, ...category, ...own]) {
-    if (!byKey.has(row.key)) byKey.set(row.key, toRequirementField(row));
-  }
-  return [...byKey.values()];
 }
 
 // ── Profile loaders ───────────────────────────────────────────────────────────
@@ -191,6 +99,7 @@ async function loadWorkerProfile(userId: string): Promise<WorkerProfile | null> 
     answers: row.answers,
     status: row.status,
     currentStep: row.currentStep,
+    rejectionReason: row.rejectionReason,
   };
 }
 
@@ -217,6 +126,7 @@ async function loadHirerProfile(userId: string): Promise<HirerProfile | null> {
     gstin: row.gstin,
     status: row.status,
     currentStep: row.currentStep,
+    rejectionReason: row.rejectionReason,
   };
 }
 
@@ -331,8 +241,12 @@ appRouter.post("/onboarding/role", async (req: Request, res: Response) => {
 
 // ── Worker draft saves ────────────────────────────────────────────────────────
 
-/** Ensure the signed-in user has an editable (draft) worker profile. */
-async function requireDraftWorker(
+/**
+ * Ensure the signed-in user has an *editable* worker profile. Editable means
+ * `draft` (first run) or `rejected` (the applicant is fixing it to re-submit);
+ * `under_review` and `approved` are locked.
+ */
+async function requireEditableWorker(
   userId: string,
   res: Response,
 ): Promise<typeof workerProfiles.$inferSelect | null> {
@@ -345,7 +259,7 @@ async function requireDraftWorker(
     res.status(404).json({ error: "Start onboarding as a worker first" });
     return null;
   }
-  if (row.status !== "draft") {
+  if (row.status !== "draft" && row.status !== "rejected") {
     res.status(409).json({ error: "Profile already submitted" });
     return null;
   }
@@ -357,7 +271,7 @@ appRouter.patch("/worker-profile", async (req: Request, res: Response) => {
   const parsed = workerProfileUpdateSchema.safeParse(req.body);
   if (!parsed.success) return invalid(res, parsed.error);
   const u = req.appUser!;
-  const current = await requireDraftWorker(u.id, res);
+  const current = await requireEditableWorker(u.id, res);
   if (!current) return;
 
   const d = parsed.data;
@@ -388,7 +302,7 @@ appRouter.put(
     const parsed = workerSkillsStepSchema.safeParse(req.body);
     if (!parsed.success) return invalid(res, parsed.error);
     const u = req.appUser!;
-    const current = await requireDraftWorker(u.id, res);
+    const current = await requireEditableWorker(u.id, res);
     if (!current) return;
 
     const { professionIds } = parsed.data;
@@ -427,7 +341,7 @@ appRouter.post(
   "/worker-profile/submit",
   async (req: Request, res: Response) => {
     const u = req.appUser!;
-    const current = await requireDraftWorker(u.id, res);
+    const current = await requireEditableWorker(u.id, res);
     if (!current) return;
 
     const fixed = workerSubmitSchema.safeParse({
@@ -475,9 +389,18 @@ appRouter.post(
       return;
     }
 
+    // Re-submitting after a rejection clears the prior decision so the row is a
+    // clean `under_review` again.
     await db
       .update(workerProfiles)
-      .set({ status: "under_review", submittedAt: new Date(), updatedAt: new Date() })
+      .set({
+        status: "under_review",
+        submittedAt: new Date(),
+        updatedAt: new Date(),
+        rejectionReason: null,
+        reviewedAt: null,
+        reviewedBy: null,
+      })
       .where(eq(workerProfiles.id, current.id));
 
     res.json(await loadOnboardingState(u.id, "worker"));
@@ -486,8 +409,11 @@ appRouter.post(
 
 // ── Hirer draft saves ─────────────────────────────────────────────────────────
 
-/** Ensure the signed-in user has an editable (draft) hirer profile. */
-async function requireDraftHirer(
+/**
+ * Ensure the signed-in user has an *editable* hirer profile — `draft` or
+ * `rejected` (see {@link requireEditableWorker}).
+ */
+async function requireEditableHirer(
   userId: string,
   res: Response,
 ): Promise<typeof hirerProfiles.$inferSelect | null> {
@@ -500,7 +426,7 @@ async function requireDraftHirer(
     res.status(404).json({ error: "Start onboarding as a hirer first" });
     return null;
   }
-  if (row.status !== "draft") {
+  if (row.status !== "draft" && row.status !== "rejected") {
     res.status(409).json({ error: "Profile already submitted" });
     return null;
   }
@@ -512,7 +438,7 @@ appRouter.patch("/hirer-profile", async (req: Request, res: Response) => {
   const parsed = hirerProfileUpdateSchema.safeParse(req.body);
   if (!parsed.success) return invalid(res, parsed.error);
   const u = req.appUser!;
-  const current = await requireDraftHirer(u.id, res);
+  const current = await requireEditableHirer(u.id, res);
   if (!current) return;
 
   const d = parsed.data;
@@ -542,7 +468,7 @@ appRouter.patch("/hirer-profile", async (req: Request, res: Response) => {
 // POST /api/app/hirer-profile/submit — validate everything → under_review.
 appRouter.post("/hirer-profile/submit", async (req: Request, res: Response) => {
   const u = req.appUser!;
-  const current = await requireDraftHirer(u.id, res);
+  const current = await requireEditableHirer(u.id, res);
   if (!current) return;
 
   const parsed = hirerSubmitSchema.safeParse({
@@ -565,10 +491,87 @@ appRouter.post("/hirer-profile/submit", async (req: Request, res: Response) => {
     return invalid(res, parsed.error);
   }
 
+  // Re-submitting after a rejection clears the prior decision.
   await db
     .update(hirerProfiles)
-    .set({ status: "under_review", submittedAt: new Date(), updatedAt: new Date() })
+    .set({
+      status: "under_review",
+      submittedAt: new Date(),
+      updatedAt: new Date(),
+      rejectionReason: null,
+      reviewedAt: null,
+      reviewedBy: null,
+    })
     .where(eq(hirerProfiles.id, current.id));
 
   res.json(await loadOnboardingState(u.id, "hirer"));
+});
+
+// ── Push tokens + in-app notifications ─────────────────────────────────────────
+
+function toNotification(row: typeof notifications.$inferSelect): Notification {
+  return {
+    id: row.id,
+    type: notificationTypeSchema.catch("profile_approved").parse(row.type),
+    title: row.title,
+    body: row.body,
+    read: row.read,
+    createdAt: row.createdAt,
+    data: row.data,
+  };
+}
+
+// POST /api/app/push-tokens — register/refresh this device's Expo push token.
+appRouter.post("/push-tokens", async (req: Request, res: Response) => {
+  const parsed = registerPushTokenSchema.safeParse(req.body);
+  if (!parsed.success) return invalid(res, parsed.error);
+  const u = req.appUser!;
+  const { token, platform } = parsed.data;
+
+  // Token is unique per device; on re-register re-point it at the current user.
+  await db
+    .insert(pushTokens)
+    .values({ userId: u.id, token, platform: platform ?? null })
+    .onConflictDoUpdate({
+      target: pushTokens.token,
+      set: { userId: u.id, platform: platform ?? null, updatedAt: new Date() },
+    });
+
+  res.status(204).end();
+});
+
+// GET /api/app/notifications — this user's notifications, newest first.
+appRouter.get("/notifications", async (req: Request, res: Response) => {
+  const u = req.appUser!;
+  const rows = await db
+    .select()
+    .from(notifications)
+    .where(eq(notifications.userId, u.id))
+    .orderBy(desc(notifications.createdAt));
+  res.json({ notifications: rows.map(toNotification) });
+});
+
+// POST /api/app/notifications/read-all — mark every notification read.
+appRouter.post("/notifications/read-all", async (req: Request, res: Response) => {
+  const u = req.appUser!;
+  await db
+    .update(notifications)
+    .set({ read: true })
+    .where(eq(notifications.userId, u.id));
+  res.status(204).end();
+});
+
+// POST /api/app/notifications/:id/read — mark one notification read (owner-scoped).
+appRouter.post("/notifications/:id/read", async (req: Request, res: Response) => {
+  const u = req.appUser!;
+  await db
+    .update(notifications)
+    .set({ read: true })
+    .where(
+      and(
+        eq(notifications.id, String(req.params.id)),
+        eq(notifications.userId, u.id),
+      ),
+    );
+  res.status(204).end();
 });
