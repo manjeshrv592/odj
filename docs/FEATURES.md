@@ -24,10 +24,13 @@ sub-items as scope is refined. `[x]` done · `[~]` in progress · `[ ]` not star
 - [x] Email OTP login UI — web (admin portal; invite-only)
 - [x] Email OTP login UI — mobile (worker/hirer; phone stubbed)
 - [ ] SMS OTP login (future — needs DLT setup)
-- [~] Role selection at signup (worker / hirer) — mobile "Continue as" screen is
-  stubbed; persistence + profile is the next feature
-- [ ] Worker profile creation
-- [ ] Hirer profile creation
+- [x] Role selection at signup (worker / hirer) — mobile "Continue as" persists
+  `userType` + creates the draft profile, then enters the role's wizard
+- [x] Worker profile creation — mobile step-by-step wizard (name, photo, city/state,
+  skills→professions, languages, cascaded requirement fields), per-step server save
+  with resume; submit → `under_review` ("under verification" screen)
+- [x] Hirer profile creation — mobile wizard (name, photo, city/state, individual vs
+  business + org type/GSTIN), per-step save with resume; submit → `under_review`
 - [x] Session management / protected routes (web `proxy.ts` + RSC guard; mobile
   `SessionGate`); admin API guarded by `requireAdmin`
 

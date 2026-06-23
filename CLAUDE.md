@@ -109,6 +109,10 @@ When a feature is completed, tick it in `docs/FEATURES.md`.
 
 - Copy `.env.example` → `.env` at the repo root and fill values. `.env` is
   git-ignored and loaded via Node's `--env-file` (no dotenv dependency).
+- **Mobile env is separate:** Expo only auto-loads a `.env` from `apps/mobile/`,
+  not the repo root, so the app's `EXPO_PUBLIC_*` vars live in `apps/mobile/.env`
+  (template: `apps/mobile/.env.example`). They're inlined at bundle time —
+  restart Metro with `expo start -c` after changing them.
 - PostgreSQL must be running with a database named `odj`.
 
 ```bash

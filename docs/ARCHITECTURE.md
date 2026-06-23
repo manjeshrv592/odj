@@ -75,4 +75,8 @@ shared conventions; each package file holds its own file/function/component map.
 `tailwind-merge`, `class-variance-authority`), plus shadcn's standard companions
 on web (`class-variance-authority`, `clsx`, `tailwind-merge`, `lucide-react`,
 `tw-animate-css`, `@base-ui/react`), and `@uploadcare/react-uploader` (web only —
-admin profile avatar uploads via the Uploadcare CDN).
+admin profile avatar uploads via the Uploadcare CDN). Mobile onboarding adds
+`expo-image-picker` + `expo-file-system` (RN photo/file uploads — the picked file
+is sent to Uploadcare's REST upload API via `File.upload` native multipart, since
+the SDK's Blob path and `{uri}` FormData aren't RN-compatible) and `expo-location`
+(city/state autodetect).

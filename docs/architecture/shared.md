@@ -74,6 +74,28 @@ packages/shared/
   (firstName, lastName, phone required; image optional).
 - `inviteAdminSchema` / `InviteAdmin` — `{ email }` (admin invite input).
 - `portalUserSchema` / `PortalUser` — admin row for the Portal-users table.
+- **Worker/hirer onboarding (mobile wizard):**
+  - `profileStatusSchema` / `ProfileStatus` — `draft | under_review | approved |
+    rejected` (drives mobile routing; `pending`→`under_review` on submit).
+  - `LANGUAGES` (curated `{code,label}[]`, English + major Indian languages) +
+    `languageCodeSchema` / `LanguageCode` — worker languages multi-select source.
+  - `gstinSchema` — 15-char Indian GSTIN (uppercased, format-validated).
+  - `hirerTypeSchema` (`individual|business`), `orgTypeSchema`
+    (`pvt_ltd|llp|partnership|proprietorship|other`).
+  - `requirementAnswersSchema` / `RequirementAnswers` — `Record<key, string |
+    string[]>`; worker answers keyed by each requirement field's stable `key`
+    (file answers store the CDN url). Required-coverage is checked server-side.
+  - Shared step payloads: `nameStepSchema`, `photoStepSchema`, `locationStepSchema`.
+  - Worker: `workerSkillsStepSchema` (≥1 professionId), `workerLanguagesStepSchema`,
+    `workerRequirementsStepSchema`, `workerProfileUpdateSchema` (partial per-step
+    PATCH), `workerSubmitSchema` (static-field submit guard), `workerProfileSchema`
+    / `WorkerProfile` (full GET shape incl. `professionIds`, `status`, `currentStep`).
+  - Hirer: `hirerTypeStepSchema` (business ⇒ orgName; gstRegistered ⇒ valid GSTIN),
+    `hirerProfileUpdateSchema`, `hirerSubmitSchema`, `hirerProfileSchema` / `HirerProfile`.
+  - `selectRoleSchema` / `SelectRole` — `{ userType: worker|hirer }` (role pick).
+  - `onboardingStateSchema` / `OnboardingState` — GET `/api/app/me` shape
+    (`userType`, `status`, `currentStep`, `worker?`, `hirer?`) that the mobile
+    SessionGate routes on and the wizard hydrates from.
 
 > Grows as features land. Prefer generating DB-owned shapes via `drizzle-zod`
 > (in backend) and re-exporting refined schemas here.

@@ -15,19 +15,26 @@ import {
 } from "@expo-google-fonts/poppins";
 import { Providers } from "@/components/providers";
 import { useSession } from "@/lib/auth-client";
+import { useOnboardingState } from "@/lib/use-onboarding";
 
 /**
- * Auth/onboarding routing gate. Watches the better-auth session and keeps the
- * user on the right screen group:
+ * Auth/onboarding routing gate. Watches the better-auth session and the mobile
+ * onboarding state (GET /api/app/me) and keeps the user on the right screen:
  *
- * - unauthenticated            → (auth)/login
- * - authed + !onboarding done  → (auth)/continue ("Continue as")
- * - authed + onboarding done   → index (home)
+ * - unauthenticated              → (auth)/login
+ * - authed, no role picked       → (auth)/continue ("Continue as")
+ * - authed, draft profile        → (onboarding)/{worker|hirer} (resumes at step)
+ * - authed, submitted/rejected   → (onboarding)/under-review
+ * - authed, approved             → index (full app — later)
  *
- * While the session restores (expo-secure-store) a spinner is shown.
+ * Routing is driven by the profile `status`, not the legacy `onboardingCompleted`
+ * boolean (which is reserved for the future "approved → in-app" flip). A spinner
+ * is shown while the session restores and while the onboarding state loads.
  */
 function SessionGate({ children }: { children: React.ReactNode }) {
   const { data: session, isPending } = useSession();
+  const authed = !!session?.user;
+  const { data: state, isLoading: stateLoading } = useOnboardingState();
   const segments = useSegments();
   const router = useRouter();
 
@@ -36,24 +43,41 @@ function SessionGate({ children }: { children: React.ReactNode }) {
 
     const seg = segments as string[];
     const inAuthGroup = seg[0] === "(auth)";
-    const onContinue = seg[1] === "continue";
-    const user = session?.user;
+    const inOnboarding = seg[0] === "(onboarding)";
 
-    if (!user) {
+    if (!authed) {
       if (!inAuthGroup) router.replace("/(auth)/login");
       return;
     }
 
-    if (!user.onboardingCompleted) {
-      if (!onContinue) router.replace("/(auth)/continue");
+    // Authed — wait for the onboarding state before routing.
+    if (stateLoading || !state) return;
+
+    if (!state.userType) {
+      if (seg[1] !== "continue") router.replace("/(auth)/continue");
       return;
     }
 
-    // Fully onboarded: get out of the auth group.
-    if (inAuthGroup) router.replace("/");
-  }, [isPending, session, segments, router]);
+    if (state.status === "approved") {
+      if (inAuthGroup || inOnboarding) router.replace("/");
+      return;
+    }
 
-  if (isPending) {
+    if (state.status === "under_review" || state.status === "rejected") {
+      if (seg[1] !== "under-review")
+        router.replace("/(onboarding)/under-review");
+      return;
+    }
+
+    // Draft (or no profile row yet): resume the wizard for the chosen role.
+    const target =
+      state.userType === "hirer"
+        ? "/(onboarding)/hirer"
+        : "/(onboarding)/worker";
+    if (seg[1] !== state.userType) router.replace(target);
+  }, [isPending, authed, state, stateLoading, segments, router]);
+
+  if (isPending || (authed && stateLoading)) {
     return (
       <View className="flex-1 items-center justify-center bg-background">
         <ActivityIndicator />

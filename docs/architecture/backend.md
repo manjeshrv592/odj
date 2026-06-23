@@ -25,11 +25,13 @@ apps/backend/
     ├── lib/
     │   └── email.ts    # Resend HTML emails: OTP + admin invite
     ├── middleware/
-    │   └── require-admin.ts # admin-only guard (better-auth session + adminRole)
+    │   ├── require-admin.ts # admin-only guard (better-auth session + adminRole)
+    │   └── require-user.ts  # mobile (worker/hirer) guard — session, rejects admins
     └── routes/
         ├── health.ts   # liveness + readiness endpoints
         ├── portal.ts   # admin Portal-users CRUD + invite (/api/portal)
-        └── catalog.ts  # categories/professions/requirement-fields CRUD (/api/portal/catalog)
+        ├── catalog.ts  # categories/professions/requirement-fields CRUD (/api/portal/catalog)
+        └── app.ts      # mobile worker/hirer onboarding API (/api/app)
 ```
 
 ## src/index.ts
@@ -44,7 +46,10 @@ apps/backend/
     (Express 5 named wildcard) via `toNodeHandler(auth)`.
   - `express.json()` for everything else.
   - `/api/health` router; `/api/portal` router; `/api/portal/catalog` router;
-    `GET /` info route.
+    `/api/app` router; `GET /` info route.
+  - Note: `cors` only allows `WEB_ORIGIN`. Native RN fetch isn't CORS-bound (the
+    app sends the session cookie directly), so `/api/app` needs no origin change;
+    only the Expo **web** preview would be blocked.
 
 ## src/env.ts
 - `env` — `parseBackendEnv(process.env)`, parsed once at import (fail-fast).
@@ -76,6 +81,34 @@ apps/backend/
   `auth.api.getSession({ headers: fromNodeHeaders(req.headers) })`; 401 if no
   session, 403 if `adminRole ∉ {root, admin}`, else attaches `req.admin`.
 - `AdminContext` — type of the attached admin user (augments `Express.Request`).
+
+## src/middleware/require-user.ts
+- `requireUser(req,res,next)` — guard for the mobile app API (`/api/app/*`). Reads
+  the better-auth session; 401 if none, 403 if the user is a portal admin
+  (`adminRole` set), else attaches `req.appUser` and continues. `userType` may be
+  null — a new user reaches the role-selection route before picking Work/Hire.
+- `AppUserContext` — shape of the attached user (augments `Express.Request`).
+
+## src/routes/app.ts
+- `appRouter` (mounted `/api/app`, all routes behind `requireUser`). The mobile
+  worker/hirer onboarding API; mirrors `catalog.ts` (zod validate → `db` →
+  projection). Helpers: `effectiveFieldsForProfessions` (active catalog+category+
+  profession requirement fields, unioned & de-duped by stable `key`),
+  `loadWorkerProfile` / `loadHirerProfile` / `loadOnboardingState` (GET-shaping),
+  `requireDraftWorker` / `requireDraftHirer` (owner + editable-status guard).
+  - **Catalog reads (active only):** `GET /catalog/categories`,
+    `GET /catalog/categories/:id/professions`,
+    `GET /catalog/effective-requirements?professionIds=a,b,c` → `{ fields }`.
+  - **State + role:** `GET /me` → `OnboardingState` (resume + SessionGate);
+    `POST /onboarding/role` — idempotent: writes `user.userType` directly (the
+    field is `input:false` on better-auth) + inserts the draft profile (409 on a
+    different role).
+  - **Worker draft:** `PATCH /worker-profile` (partial per-step save + `currentStep`),
+    `PUT /worker-profile/professions` (replace the join rows),
+    `POST /worker-profile/submit` (validate static fields + ≥1 profession + required
+    requirement answers → `under_review`).
+  - **Hirer draft:** `PATCH /hirer-profile`, `POST /hirer-profile/submit`
+    (validate static fields + business/GST rules → `under_review`).
 
 ## src/routes/portal.ts
 - `portalRouter` (mounted `/api/portal`, all routes behind `requireAdmin`):
@@ -135,6 +168,18 @@ apps/backend/
   isActive, timestamps. Indexed on `category_id` and `profession_id`.
 - Migrations `0003_*` adds `categories.image`, the two enums, and the `professions`
   + `requirement_fields` tables.
+- `profileStatus` / `hirerType` / `orgType` — pgEnums for onboarding profiles.
+- `worker_profiles` — one per user (`user_id` unique FK → user, cascade): names,
+  `photo_url`, city/state, `lat`/`lng` (double precision), `languages` jsonb,
+  `answers` jsonb (`Record<key, string|string[]>`), `status` (`profile_status`,
+  default `draft`), `current_step`, `submitted_at`, timestamps.
+- `worker_professions` — worker↔profession join (composite PK
+  `(worker_profile_id, profession_id)`, both FKs cascade; index on profession).
+- `hirer_profiles` — one per user: names, `photo_url`, city/state/lat/lng,
+  `hirer_type`, `org_name`, `org_type`, `gst_registered`, `gstin`, `status`,
+  `current_step`, `submitted_at`, timestamps.
+- Migration `0004_*` adds the three enums + `worker_profiles` /
+  `worker_professions` / `hirer_profiles` tables.
 
 ## src/db/auth-schema.ts
 - better-auth Drizzle tables: `user`, `session`, `account`, `verification`.
