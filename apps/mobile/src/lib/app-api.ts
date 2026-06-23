@@ -5,6 +5,7 @@ import type {
   RequirementField,
   WorkerProfileUpdate,
   HirerProfileUpdate,
+  Notification,
 } from "@odj/shared";
 import { API_URL } from "./api";
 import { authClient } from "./auth-client";
@@ -58,6 +59,9 @@ async function authedFetch<T>(path: string, init?: RequestInit): Promise<T> {
 /** TanStack Query key for the onboarding state (SessionGate + wizard resume). */
 export const ONBOARDING_STATE_KEY = ["onboarding-state"] as const;
 
+/** TanStack Query key for the in-app notifications list. */
+export const NOTIFICATIONS_KEY = ["notifications"] as const;
+
 /** Typed endpoint functions for the onboarding flow. */
 export const appApi = {
   me: () => authedFetch<OnboardingState>("/api/app/me"),
@@ -110,4 +114,15 @@ export const appApi = {
     authedFetch<OnboardingState>("/api/app/hirer-profile/submit", {
       method: "POST",
     }),
+
+  notifications: () =>
+    authedFetch<{ notifications: Notification[] }>(
+      "/api/app/notifications",
+    ).then((r) => r.notifications),
+
+  markNotificationRead: (id: string) =>
+    authedFetch<void>(`/api/app/notifications/${id}/read`, { method: "POST" }),
+
+  markAllNotificationsRead: () =>
+    authedFetch<void>("/api/app/notifications/read-all", { method: "POST" }),
 };

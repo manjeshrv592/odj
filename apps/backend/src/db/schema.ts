@@ -174,6 +174,11 @@ export const workerProfiles = pgTable("worker_profiles", {
   status: profileStatus("status").notNull().default("draft"),
   currentStep: integer("current_step").notNull().default(0),
   submittedAt: timestamp("submitted_at"),
+  rejectionReason: text("rejection_reason"),
+  reviewedAt: timestamp("reviewed_at"),
+  reviewedBy: text("reviewed_by").references(() => user.id, {
+    onDelete: "set null",
+  }),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
@@ -225,6 +230,54 @@ export const hirerProfiles = pgTable("hirer_profiles", {
   status: profileStatus("status").notNull().default("draft"),
   currentStep: integer("current_step").notNull().default(0),
   submittedAt: timestamp("submitted_at"),
+  rejectionReason: text("rejection_reason"),
+  reviewedAt: timestamp("reviewed_at"),
+  reviewedBy: text("reviewed_by").references(() => user.id, {
+    onDelete: "set null",
+  }),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
+
+// ── Push tokens + in-app notifications ───────────────────────────────────────
+/**
+ * Expo push tokens registered per device. `token` is unique (a device's token is
+ * stable); on re-register we re-point it at the current user. Removing a user
+ * removes their tokens.
+ */
+export const pushTokens = pgTable(
+  "push_tokens",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    token: text("token").notNull().unique(),
+    platform: text("platform"),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+    updatedAt: timestamp("updated_at").notNull().defaultNow(),
+  },
+  (t) => [index("push_tokens_user_idx").on(t.userId)],
+);
+
+/**
+ * In-app notifications shown to a worker/hirer (verification decisions for now;
+ * reusable later for chat/disputes/hiring). `data` is an optional payload (e.g.
+ * a deep-link target). Removing a user removes their notifications.
+ */
+export const notifications = pgTable(
+  "notifications",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    type: text("type").notNull(),
+    title: text("title").notNull(),
+    body: text("body").notNull(),
+    data: jsonb("data").$type<Record<string, unknown>>(),
+    read: boolean("read").notNull().default(false),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+  },
+  (t) => [index("notifications_user_idx").on(t.userId)],
+);

@@ -6,6 +6,7 @@ import { env } from "./env";
 import { healthRouter } from "./routes/health";
 import { portalRouter } from "./routes/portal";
 import { catalogRouter } from "./routes/catalog";
+import { verificationsRouter } from "./routes/verifications";
 import { appRouter } from "./routes/app";
 
 /**
@@ -33,6 +34,7 @@ export function createApp(): Express {
   app.use("/api/health", healthRouter);
   app.use("/api/portal", portalRouter);
   app.use("/api/portal/catalog", catalogRouter);
+  app.use("/api/portal/verifications", verificationsRouter);
   app.use("/api/app", appRouter);
 
   app.get("/", (_req: Request, res: Response) => {

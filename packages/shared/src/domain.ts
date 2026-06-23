@@ -574,6 +574,7 @@ export const workerProfileSchema = z.object({
   answers: requirementAnswersSchema,
   status: profileStatusSchema,
   currentStep: z.number().int(),
+  rejectionReason: z.string().nullish(),
 });
 export type WorkerProfile = z.infer<typeof workerProfileSchema>;
 
@@ -682,6 +683,7 @@ export const hirerProfileSchema = z.object({
   gstin: z.string().nullish(),
   status: profileStatusSchema,
   currentStep: z.number().int(),
+  rejectionReason: z.string().nullish(),
 });
 export type HirerProfile = z.infer<typeof hirerProfileSchema>;
 
@@ -706,3 +708,112 @@ export const onboardingStateSchema = z.object({
   hirer: hirerProfileSchema.nullish(),
 });
 export type OnboardingState = z.infer<typeof onboardingStateSchema>;
+
+// ── Admin profile verification (approve / reject) ─────────────────────────────
+
+/** Which kind of profile a verification row refers to. */
+export const profileKindSchema = z.enum(["worker", "hirer"]);
+export type ProfileKind = z.infer<typeof profileKindSchema>;
+
+/** Reason an admin must supply when rejecting a profile. */
+export const rejectProfileSchema = z.object({
+  reason: z.string().trim().min(1, "A reason is required").max(1000),
+});
+export type RejectProfile = z.infer<typeof rejectProfileSchema>;
+
+/**
+ * A row in the admin Verifications queue. `type` distinguishes the profile table;
+ * `id` is the profile id (use with `type` for the detail/decision endpoints).
+ */
+export const verificationListItemSchema = z.object({
+  id: z.uuid(),
+  type: profileKindSchema,
+  userId: z.string(),
+  name: z.string(),
+  city: z.string().nullish(),
+  state: z.string().nullish(),
+  photoUrl: z.url().nullish(),
+  status: profileStatusSchema,
+  submittedAt: z.coerce.date().nullish(),
+});
+export type VerificationListItem = z.infer<typeof verificationListItemSchema>;
+
+/**
+ * One resolved requirement answer for the admin detail view: the stored value
+ * mapped back to its field `label`/`inputType`. `resolved` is false when the
+ * field was edited/deleted since the worker answered (only the raw `key` is known).
+ */
+export const verificationAnswerSchema = z.object({
+  key: z.string(),
+  label: z.string().nullish(),
+  inputType: requirementInputTypeSchema.nullish(),
+  value: requirementAnswerValueSchema,
+  resolved: z.boolean(),
+});
+export type VerificationAnswer = z.infer<typeof verificationAnswerSchema>;
+
+/**
+ * Full profile detail an admin reviews before approving/rejecting. Carries the
+ * fixed fields, the applicant's email, the type-specific data (worker skills/
+ * languages/answers or hirer business/GST), and the reviewer audit trail.
+ */
+export const verificationDetailSchema = z.object({
+  id: z.uuid(),
+  type: profileKindSchema,
+  userId: z.string(),
+  email: z.email(),
+  firstName: z.string().nullish(),
+  lastName: z.string().nullish(),
+  photoUrl: z.url().nullish(),
+  city: z.string().nullish(),
+  state: z.string().nullish(),
+  lat: z.number().nullish(),
+  lng: z.number().nullish(),
+  status: profileStatusSchema,
+  submittedAt: z.coerce.date().nullish(),
+  // Worker-only
+  professions: z.array(z.object({ id: z.uuid(), name: z.string() })).nullish(),
+  languages: z
+    .array(z.object({ code: z.string(), label: z.string() }))
+    .nullish(),
+  answers: z.array(verificationAnswerSchema).nullish(),
+  // Hirer-only
+  hirerType: hirerTypeSchema.nullish(),
+  orgName: z.string().nullish(),
+  orgType: orgTypeSchema.nullish(),
+  gstRegistered: z.boolean().nullish(),
+  gstin: z.string().nullish(),
+  // Reviewer audit
+  reviewedAt: z.coerce.date().nullish(),
+  reviewedByName: z.string().nullish(),
+  rejectionReason: z.string().nullish(),
+});
+export type VerificationDetail = z.infer<typeof verificationDetailSchema>;
+
+// ── In-app notifications + push tokens ────────────────────────────────────────
+
+/** Notification kinds created by the platform (extensible as features land). */
+export const notificationTypeSchema = z.enum([
+  "profile_approved",
+  "profile_rejected",
+]);
+export type NotificationType = z.infer<typeof notificationTypeSchema>;
+
+/** A user-facing in-app notification (GET /api/app/notifications). */
+export const notificationSchema = z.object({
+  id: z.uuid(),
+  type: notificationTypeSchema,
+  title: z.string(),
+  body: z.string(),
+  read: z.boolean(),
+  createdAt: z.coerce.date(),
+  data: z.record(z.string(), z.unknown()).nullish(),
+});
+export type Notification = z.infer<typeof notificationSchema>;
+
+/** Register an Expo push token for the signed-in device (POST /api/app/push-tokens). */
+export const registerPushTokenSchema = z.object({
+  token: z.string().trim().min(1).max(255),
+  platform: z.enum(["ios", "android", "web"]).nullish(),
+});
+export type RegisterPushToken = z.infer<typeof registerPushTokenSchema>;

@@ -52,9 +52,16 @@ sub-items as scope is refined. `[x]` done · `[~]` in progress · `[ ]` not star
 
 ## 3. Admin — approvals
 
-- [ ] Review & approve/reject worker profiles + documents
-- [ ] Review & approve/reject hirer profiles
-- [ ] Notifications to applicants on decision
+- [x] Review & approve/reject worker profiles + documents — admin Verifications
+  queue (filter by type + status, default pending) → full detail (photo, skills,
+  languages, label-resolved requirement answers + doc lightbox) → approve / reject
+  with reason
+- [x] Review & approve/reject hirer profiles — same queue/detail (individual vs
+  business + org/GST shown)
+- [x] Notifications to applicants on decision — branded email + in-app notification
+  on approve/reject; rejected users see the reason and can fix & re-submit
+  (→ `under_review`). Mobile push is deferred (needs an EAS dev build; backend seam
+  ready) — see [ARCHITECTURE.md](./ARCHITECTURE.md).
 
 ## 4. Hiring flow
 

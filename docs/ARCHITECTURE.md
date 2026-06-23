@@ -79,4 +79,7 @@ admin profile avatar uploads via the Uploadcare CDN). Mobile onboarding adds
 `expo-image-picker` + `expo-file-system` (RN photo/file uploads — the picked file
 is sent to Uploadcare's REST upload API via `File.upload` native multipart, since
 the SDK's Blob path and `{uri}` FormData aren't RN-compatible) and `expo-location`
-(city/state autodetect).
+(city/state autodetect). Mobile push is **deferred** (Expo Go dropped remote push in
+SDK 53; it needs an EAS dev build) — the backend push seam exists (`push_tokens` +
+Expo Push API over HTTPS, no server dep) but the mobile `expo-notifications` client
+is not wired up yet; verification notices reach users via email + in-app.
