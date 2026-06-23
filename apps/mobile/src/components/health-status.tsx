@@ -3,6 +3,16 @@ import { useQuery } from "@tanstack/react-query";
 import { healthResponseSchema, type HealthResponse } from "@odj/shared";
 import { apiFetch } from "@/lib/api";
 
+/** Status dot — green when `ok`, red otherwise. Declared at module scope so it
+ * isn't re-created each render (react-hooks/static-components). */
+function Dot({ ok }: { ok: boolean }) {
+  return (
+    <View
+      className={`mr-2 h-2.5 w-2.5 rounded-full ${ok ? "bg-green-500" : "bg-red-500"}`}
+    />
+  );
+}
+
 /**
  * Live backend connectivity card. Proves the wiring end-to-end:
  * mobile → TanStack Query → Express `/api/health` → PostgreSQL.
@@ -14,12 +24,6 @@ export function HealthStatus() {
       healthResponseSchema.parse(await apiFetch("/api/health")),
     refetchInterval: 10_000,
   });
-
-  const Dot = ({ ok }: { ok: boolean }) => (
-    <View
-      className={`mr-2 h-2.5 w-2.5 rounded-full ${ok ? "bg-green-500" : "bg-red-500"}`}
-    />
-  );
 
   return (
     <View className="w-full max-w-sm rounded-lg border border-border bg-card p-4">

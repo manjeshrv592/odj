@@ -387,3 +387,322 @@ export const portalUserSchema = z.object({
   createdAt: z.coerce.date(),
 });
 export type PortalUser = z.infer<typeof portalUserSchema>;
+
+// ── Worker / Hirer onboarding (mobile) ───────────────────────────────────────
+
+/**
+ * Lifecycle of a worker/hirer profile collected in the mobile onboarding wizard.
+ * `draft` while the multi-step wizard is in progress (resumable per step);
+ * `under_review` after final submit (awaiting admin approval — a later feature);
+ * `approved` / `rejected` are the eventual admin-decision outcomes.
+ */
+export const profileStatusSchema = z.enum([
+  "draft",
+  "under_review",
+  "approved",
+  "rejected",
+]);
+export type ProfileStatus = z.infer<typeof profileStatusSchema>;
+
+/**
+ * Curated languages a worker can speak, shown as a multi-select in onboarding.
+ * Static for now (English + major Indian languages); may move to an admin-managed
+ * catalog later. `code` is the stored value, `label` the UI text.
+ */
+export const LANGUAGES = [
+  { code: "en", label: "English" },
+  { code: "hi", label: "Hindi" },
+  { code: "bn", label: "Bengali" },
+  { code: "te", label: "Telugu" },
+  { code: "mr", label: "Marathi" },
+  { code: "ta", label: "Tamil" },
+  { code: "ur", label: "Urdu" },
+  { code: "gu", label: "Gujarati" },
+  { code: "kn", label: "Kannada" },
+  { code: "or", label: "Odia" },
+  { code: "ml", label: "Malayalam" },
+  { code: "pa", label: "Punjabi" },
+  { code: "as", label: "Assamese" },
+  { code: "mai", label: "Maithili" },
+  { code: "sat", label: "Santali" },
+  { code: "ks", label: "Kashmiri" },
+  { code: "ne", label: "Nepali" },
+  { code: "kok", label: "Konkani" },
+  { code: "sd", label: "Sindhi" },
+] as const;
+
+/** A valid language code from {@link LANGUAGES}. */
+export const languageCodeSchema = z.enum(
+  LANGUAGES.map((l) => l.code) as [string, ...string[]],
+);
+export type LanguageCode = (typeof LANGUAGES)[number]["code"];
+
+/**
+ * Indian GSTIN — 15 chars: 2-digit state code, 10-char PAN, 1 entity digit, a
+ * fixed `Z`, and 1 checksum char. Normalised to uppercase before validating.
+ */
+export const gstinSchema = z
+  .string()
+  .trim()
+  .toUpperCase()
+  .regex(
+    /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][0-9A-Z]Z[0-9A-Z]$/,
+    "Enter a valid 15-character GSTIN",
+  );
+
+/** Whether a hirer is an individual or a registered business. */
+export const hirerTypeSchema = z.enum(["individual", "business"]);
+export type HirerType = z.infer<typeof hirerTypeSchema>;
+
+/** Legal organisation type for a business hirer (optional at onboarding). */
+export const orgTypeSchema = z.enum([
+  "pvt_ltd",
+  "llp",
+  "partnership",
+  "proprietorship",
+  "other",
+]);
+export type OrgType = z.infer<typeof orgTypeSchema>;
+
+/**
+ * A worker's answers to the cascaded requirement fields, keyed by each field's
+ * stable `key`. Text/select answers are a string; multi-value answers are a
+ * string[]; file answers store the uploaded CDN url string. The set of expected
+ * keys is dynamic (depends on the chosen professions), so completeness/required
+ * validation happens server-side against the effective field set at submit time.
+ */
+export const requirementAnswerValueSchema = z.union([
+  z.string(),
+  z.array(z.string()),
+]);
+export const requirementAnswersSchema = z.record(
+  z.string(),
+  requirementAnswerValueSchema,
+);
+export type RequirementAnswers = z.infer<typeof requirementAnswersSchema>;
+
+// ── Shared onboarding step payloads ──────────────────────────────────────────
+
+/** Name step — shared by worker & hirer wizards. */
+export const nameStepSchema = z.object({
+  firstName: z.string().trim().min(1, "First name is required").max(60),
+  lastName: z.string().trim().min(1, "Last name is required").max(60),
+});
+export type NameStep = z.infer<typeof nameStepSchema>;
+
+/** Profile-photo step — stores the uploaded Uploadcare CDN url. */
+export const photoStepSchema = z.object({ photoUrl: z.url() });
+export type PhotoStep = z.infer<typeof photoStepSchema>;
+
+/** City/State step — autodetected (with lat/lng) or entered manually. */
+export const locationStepSchema = z.object({
+  city: z.string().trim().min(1, "City is required").max(120),
+  state: z.string().trim().min(1, "State is required").max(120),
+  lat: z.number().min(-90).max(90).nullish(),
+  lng: z.number().min(-180).max(180).nullish(),
+});
+export type LocationStep = z.infer<typeof locationStepSchema>;
+
+// ── Worker onboarding ────────────────────────────────────────────────────────
+
+/** Skills step — one or more professions from the catalog. */
+export const workerSkillsStepSchema = z.object({
+  professionIds: z.array(z.uuid()).min(1, "Pick at least one profession"),
+});
+export type WorkerSkillsStep = z.infer<typeof workerSkillsStepSchema>;
+
+/** Languages step — one or more curated languages. */
+export const workerLanguagesStepSchema = z.object({
+  languages: z.array(languageCodeSchema).min(1, "Pick at least one language"),
+});
+export type WorkerLanguagesStep = z.infer<typeof workerLanguagesStepSchema>;
+
+/** Requirement-fields step — answers keyed by stable field `key`. */
+export const workerRequirementsStepSchema = z.object({
+  answers: requirementAnswersSchema,
+});
+export type WorkerRequirementsStep = z.infer<
+  typeof workerRequirementsStepSchema
+>;
+
+/**
+ * Partial per-step save for a worker draft (PATCH /api/app/worker-profile).
+ * Every field optional; `currentStep` advances the resumable wizard cursor.
+ * (Professions are saved via PUT /worker-profile/professions, not here.)
+ */
+export const workerProfileUpdateSchema = z
+  .object({
+    firstName: z.string().trim().min(1).max(60).optional(),
+    lastName: z.string().trim().min(1).max(60).optional(),
+    photoUrl: z.url().nullish(),
+    city: z.string().trim().min(1).max(120).optional(),
+    state: z.string().trim().min(1).max(120).optional(),
+    lat: z.number().min(-90).max(90).nullish(),
+    lng: z.number().min(-180).max(180).nullish(),
+    languages: z.array(languageCodeSchema).optional(),
+    answers: requirementAnswersSchema.optional(),
+    currentStep: z.number().int().min(0).max(20).optional(),
+  })
+  .strict();
+export type WorkerProfileUpdate = z.infer<typeof workerProfileUpdateSchema>;
+
+/**
+ * Static-field validation applied at worker submit (dynamic requirement answers
+ * + ≥1 profession are checked server-side against the effective field set).
+ */
+export const workerSubmitSchema = z.object({
+  firstName: z.string().trim().min(1, "First name is required").max(60),
+  lastName: z.string().trim().min(1, "Last name is required").max(60),
+  photoUrl: z.url("A profile photo is required"),
+  city: z.string().trim().min(1, "City is required").max(120),
+  state: z.string().trim().min(1, "State is required").max(120),
+  languages: z.array(languageCodeSchema).min(1, "Pick at least one language"),
+});
+
+/** Full worker profile as returned by GET /api/app/me. */
+export const workerProfileSchema = z.object({
+  id: z.uuid(),
+  firstName: z.string().nullish(),
+  lastName: z.string().nullish(),
+  photoUrl: z.url().nullish(),
+  city: z.string().nullish(),
+  state: z.string().nullish(),
+  lat: z.number().nullish(),
+  lng: z.number().nullish(),
+  professionIds: z.array(z.uuid()),
+  languages: z.array(z.string()),
+  answers: requirementAnswersSchema,
+  status: profileStatusSchema,
+  currentStep: z.number().int(),
+});
+export type WorkerProfile = z.infer<typeof workerProfileSchema>;
+
+// ── Hirer onboarding ─────────────────────────────────────────────────────────
+
+/**
+ * "Who are you hiring as?" step. Individuals need nothing more; a business needs
+ * a legal name, an optional org type, and — if GST-registered — a valid GSTIN.
+ */
+export const hirerTypeStepSchema = z
+  .object({
+    hirerType: hirerTypeSchema,
+    orgName: z.string().trim().min(1).max(160).nullish(),
+    orgType: orgTypeSchema.nullish(),
+    gstRegistered: z.boolean().default(false),
+    gstin: gstinSchema.nullish(),
+  })
+  .superRefine((data, ctx) => {
+    if (data.hirerType !== "business") return;
+    if (!data.orgName) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["orgName"],
+        message: "Organization name is required for a business",
+      });
+    }
+    if (data.gstRegistered && !data.gstin) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["gstin"],
+        message: "Enter your GSTIN, or turn off GST registered",
+      });
+    }
+  });
+export type HirerTypeStep = z.infer<typeof hirerTypeStepSchema>;
+
+/**
+ * Partial per-step save for a hirer draft (PATCH /api/app/hirer-profile). Every
+ * field optional; the business/GST cross-field rules are enforced at submit.
+ */
+export const hirerProfileUpdateSchema = z
+  .object({
+    firstName: z.string().trim().min(1).max(60).optional(),
+    lastName: z.string().trim().min(1).max(60).optional(),
+    photoUrl: z.url().nullish(),
+    city: z.string().trim().min(1).max(120).optional(),
+    state: z.string().trim().min(1).max(120).optional(),
+    lat: z.number().min(-90).max(90).nullish(),
+    lng: z.number().min(-180).max(180).nullish(),
+    hirerType: hirerTypeSchema.optional(),
+    orgName: z.string().trim().max(160).nullish(),
+    orgType: orgTypeSchema.nullish(),
+    gstRegistered: z.boolean().optional(),
+    gstin: gstinSchema.nullish(),
+    currentStep: z.number().int().min(0).max(20).optional(),
+  })
+  .strict();
+export type HirerProfileUpdate = z.infer<typeof hirerProfileUpdateSchema>;
+
+/** Validation applied at hirer submit (static fields + business/GST rules). */
+export const hirerSubmitSchema = z
+  .object({
+    firstName: z.string().trim().min(1, "First name is required").max(60),
+    lastName: z.string().trim().min(1, "Last name is required").max(60),
+    photoUrl: z.url("A profile photo is required"),
+    city: z.string().trim().min(1, "City is required").max(120),
+    state: z.string().trim().min(1, "State is required").max(120),
+    hirerType: hirerTypeSchema,
+    orgName: z.string().trim().min(1).max(160).nullish(),
+    orgType: orgTypeSchema.nullish(),
+    gstRegistered: z.boolean().default(false),
+    gstin: gstinSchema.nullish(),
+  })
+  .superRefine((data, ctx) => {
+    if (data.hirerType !== "business") return;
+    if (!data.orgName) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["orgName"],
+        message: "Organization name is required for a business",
+      });
+    }
+    if (data.gstRegistered && !data.gstin) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["gstin"],
+        message: "Enter your GSTIN, or turn off GST registered",
+      });
+    }
+  });
+
+/** Full hirer profile as returned by GET /api/app/me. */
+export const hirerProfileSchema = z.object({
+  id: z.uuid(),
+  firstName: z.string().nullish(),
+  lastName: z.string().nullish(),
+  photoUrl: z.url().nullish(),
+  city: z.string().nullish(),
+  state: z.string().nullish(),
+  lat: z.number().nullish(),
+  lng: z.number().nullish(),
+  hirerType: hirerTypeSchema.nullish(),
+  orgName: z.string().nullish(),
+  orgType: orgTypeSchema.nullish(),
+  gstRegistered: z.boolean(),
+  gstin: z.string().nullish(),
+  status: profileStatusSchema,
+  currentStep: z.number().int(),
+});
+export type HirerProfile = z.infer<typeof hirerProfileSchema>;
+
+// ── Role selection + onboarding state ────────────────────────────────────────
+
+/** "Continue as" — picks the marketplace role (worker or hirer). */
+export const selectRoleSchema = z.object({
+  userType: z.enum(["worker", "hirer"]),
+});
+export type SelectRole = z.infer<typeof selectRoleSchema>;
+
+/**
+ * The mobile onboarding state (GET /api/app/me) the SessionGate routes on and the
+ * wizard hydrates from: the chosen role, the draft's status + resumable step, and
+ * whichever profile exists. `userType` null ⇒ no role picked yet ("Continue as").
+ */
+export const onboardingStateSchema = z.object({
+  userType: userTypeSchema.nullish(),
+  status: profileStatusSchema.nullish(),
+  currentStep: z.number().int().nullish(),
+  worker: workerProfileSchema.nullish(),
+  hirer: hirerProfileSchema.nullish(),
+});
+export type OnboardingState = z.infer<typeof onboardingStateSchema>;

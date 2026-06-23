@@ -35,7 +35,20 @@
           }
         }
       ],
-      "expo-secure-store"
+      "expo-secure-store",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "ODJ uses your photos so you can add a profile picture and upload required documents.",
+          "cameraPermission": "ODJ uses your camera so you can take a profile picture and capture required documents."
+        }
+      ],
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "ODJ uses your location to set your city — this helps show your profile to nearby hirers. You can also enter it manually."
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true,

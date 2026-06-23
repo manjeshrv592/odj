@@ -7,12 +7,16 @@ import {
   integer,
   jsonb,
   timestamp,
+  doublePrecision,
   index,
   uniqueIndex,
+  primaryKey,
 } from "drizzle-orm/pg-core";
+import { user } from "./auth-schema";
 import type {
   AllowedFileType,
   RequirementOption,
+  RequirementAnswers,
 } from "@odj/shared";
 
 /**
@@ -117,3 +121,110 @@ export const requirementFields = pgTable(
     index("requirement_fields_profession_idx").on(t.professionId),
   ],
 );
+
+// ── Worker / Hirer onboarding profiles (mobile) ──────────────────────────────
+/**
+ * Lifecycle of a worker/hirer profile: `draft` while the resumable onboarding
+ * wizard is in progress, `under_review` after submit (awaiting admin approval —
+ * later), `approved` / `rejected` are the admin-decision outcomes.
+ */
+export const profileStatus = pgEnum("profile_status", [
+  "draft",
+  "under_review",
+  "approved",
+  "rejected",
+]);
+
+/** Whether a hirer is an individual or a registered business. */
+export const hirerType = pgEnum("hirer_type", ["individual", "business"]);
+
+/** Legal organisation type for a business hirer. */
+export const orgType = pgEnum("org_type", [
+  "pvt_ltd",
+  "llp",
+  "partnership",
+  "proprietorship",
+  "other",
+]);
+
+/**
+ * A worker's onboarding profile (one per user). Fixed columns for the known
+ * fields; `answers` is a JSONB map keyed by each requirement field's stable
+ * `key` (survives label edits). Chosen professions live in `worker_professions`.
+ * `current_step` is the resumable wizard cursor; `status` drives mobile routing.
+ */
+export const workerProfiles = pgTable("worker_profiles", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  userId: text("user_id")
+    .notNull()
+    .unique()
+    .references(() => user.id, { onDelete: "cascade" }),
+  firstName: text("first_name"),
+  lastName: text("last_name"),
+  photoUrl: text("photo_url"),
+  city: text("city"),
+  state: text("state"),
+  lat: doublePrecision("lat"),
+  lng: doublePrecision("lng"),
+  languages: jsonb("languages").$type<string[]>().notNull().default([]),
+  answers: jsonb("answers")
+    .$type<RequirementAnswers>()
+    .notNull()
+    .default({}),
+  status: profileStatus("status").notNull().default("draft"),
+  currentStep: integer("current_step").notNull().default(0),
+  submittedAt: timestamp("submitted_at"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+/**
+ * Worker ↔ profession join (a worker may have multiple skills). Kept relational
+ * rather than JSON so future hiring-search can filter/join by profession.
+ * Removing a profile or profession removes its rows.
+ */
+export const workerProfessions = pgTable(
+  "worker_professions",
+  {
+    workerProfileId: uuid("worker_profile_id")
+      .notNull()
+      .references(() => workerProfiles.id, { onDelete: "cascade" }),
+    professionId: uuid("profession_id")
+      .notNull()
+      .references(() => professions.id, { onDelete: "cascade" }),
+  },
+  (t) => [
+    primaryKey({ columns: [t.workerProfileId, t.professionId] }),
+    index("worker_professions_profession_idx").on(t.professionId),
+  ],
+);
+
+/**
+ * A hirer's onboarding profile (one per user). Individuals stop after the basics;
+ * a business adds a legal name, optional org type, and an optional GSTIN (the
+ * Individual/Business + GSTIN data later decides invoice type at payments time).
+ */
+export const hirerProfiles = pgTable("hirer_profiles", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  userId: text("user_id")
+    .notNull()
+    .unique()
+    .references(() => user.id, { onDelete: "cascade" }),
+  firstName: text("first_name"),
+  lastName: text("last_name"),
+  photoUrl: text("photo_url"),
+  city: text("city"),
+  state: text("state"),
+  lat: doublePrecision("lat"),
+  lng: doublePrecision("lng"),
+  hirerType: hirerType("hirer_type"),
+  orgName: text("org_name"),
+  orgType: orgType("org_type"),
+  gstRegistered: boolean("gst_registered").notNull().default(false),
+  gstin: text("gstin"),
+  status: profileStatus("status").notNull().default("draft"),
+  currentStep: integer("current_step").notNull().default(0),
+  submittedAt: timestamp("submitted_at"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});

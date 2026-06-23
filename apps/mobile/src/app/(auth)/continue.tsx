@@ -1,31 +1,43 @@
-import { View, Alert } from "react-native";
+import { View, Alert, ActivityIndicator } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { signOut } from "@/lib/auth-client";
+import { appApi, ONBOARDING_STATE_KEY } from "@/lib/app-api";
 import { Text } from "@/components/ui/text";
 import { Button } from "@/components/ui/button";
 
 /**
- * "Continue as" — shown to an authenticated user who hasn't finished onboarding.
- *
- * The two buttons are STUBS for this feature: real role selection + profile
- * completion (persisting userType=worker|hirer and onboardingCompleted) is the
- * next feature. For now they just acknowledge the tap.
+ * "Continue as" — the first onboarding screen for a user with no role yet.
+ * Picking Work/Hire persists `userType` + creates the draft profile
+ * (POST /api/app/onboarding/role), then enters that role's wizard. The choice is
+ * fixed for this feature (changing roles later is a separate feature).
  */
 export default function ContinueScreen() {
   const router = useRouter();
+  const qc = useQueryClient();
 
-  function pick(role: "Work" | "Hire") {
-    Alert.alert(
-      "Coming soon",
-      `"${role}" selection and profile setup arrive in the next update.`,
-    );
-  }
+  const choose = useMutation({
+    mutationFn: (userType: "worker" | "hirer") => appApi.selectRole(userType),
+    onSuccess: (state) => {
+      qc.setQueryData(ONBOARDING_STATE_KEY, state);
+      router.replace(
+        state.userType === "hirer"
+          ? "/(onboarding)/hirer"
+          : "/(onboarding)/worker",
+      );
+    },
+    onError: (e: Error) =>
+      Alert.alert("Something went wrong", e.message || "Please try again."),
+  });
 
   async function handleSignOut() {
     await signOut();
+    qc.removeQueries({ queryKey: ONBOARDING_STATE_KEY });
     router.replace("/(auth)/login");
   }
+
+  const busy = choose.isPending;
 
   return (
     <SafeAreaView className="flex-1 bg-background">
@@ -38,15 +50,32 @@ export default function ContinueScreen() {
         </View>
 
         <View className="gap-4">
-          <Button size="lg" onPress={() => pick("Work")}>
-            <Text>I want to Work</Text>
+          <Button
+            size="lg"
+            disabled={busy}
+            onPress={() => choose.mutate("worker")}
+          >
+            {busy && choose.variables === "worker" ? (
+              <ActivityIndicator color="#fff" />
+            ) : (
+              <Text>I want to Work</Text>
+            )}
           </Button>
-          <Button size="lg" variant="secondary" onPress={() => pick("Hire")}>
-            <Text>I want to Hire</Text>
+          <Button
+            size="lg"
+            variant="secondary"
+            disabled={busy}
+            onPress={() => choose.mutate("hirer")}
+          >
+            {busy && choose.variables === "hirer" ? (
+              <ActivityIndicator />
+            ) : (
+              <Text>I want to Hire</Text>
+            )}
           </Button>
         </View>
 
-        <Button variant="ghost" onPress={handleSignOut}>
+        <Button variant="ghost" disabled={busy} onPress={handleSignOut}>
           <Text>Sign out</Text>
         </Button>
       </View>

@@ -105,6 +105,11 @@ Change these, not call sites — everything inherits.
   Frame it with our `Card`/`Label`/`Button`, but don't try to restyle its
   internals here. (If brand-matching is needed later, theme it via Uploadcare's
   CSS custom properties, not by overriding our tokens.)
+- **Mobile uploads** use the native `expo-image-picker` (no third-party widget)
+  and upload via `expo-file-system` `File.upload` (native multipart) to
+  Uploadcare's REST API (`lib/uploadcare.ts`), so the picker UI is the OS sheet and
+  the surrounding UI uses our own `ImageField` primitive — on-brand, unlike the web
+  widget.
 
 ## Checklist when restyling
 
