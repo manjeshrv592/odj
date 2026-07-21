@@ -6,6 +6,11 @@ import type {
   WorkerProfileUpdate,
   HirerProfileUpdate,
   Notification,
+  WorkerRateRow,
+  SetWorkerRates,
+  DayOff,
+  ToggleDayOff,
+  PreciseLocation,
 } from "@odj/shared";
 import { API_URL } from "./api";
 import { authClient } from "./auth-client";
@@ -61,6 +66,10 @@ export const ONBOARDING_STATE_KEY = ["onboarding-state"] as const;
 
 /** TanStack Query key for the in-app notifications list. */
 export const NOTIFICATIONS_KEY = ["notifications"] as const;
+
+/** TanStack Query keys for the approved-worker screens. */
+export const WORKER_RATES_KEY = ["worker", "rates"] as const;
+export const WORKER_DAYS_OFF_KEY = ["worker", "days-off"] as const;
 
 /** Typed endpoint functions for the onboarding flow. */
 export const appApi = {
@@ -125,4 +134,41 @@ export const appApi = {
 
   markAllNotificationsRead: () =>
     authedFetch<void>("/api/app/notifications/read-all", { method: "POST" }),
+
+  // ── Approved-worker: rates, availability, location ──────────────────────────
+  workerRates: () =>
+    authedFetch<{ rates: WorkerRateRow[] }>("/api/app/worker/rates").then(
+      (r) => r.rates,
+    ),
+
+  saveWorkerRates: (rates: SetWorkerRates["rates"]) =>
+    authedFetch<void>("/api/app/worker/rates", {
+      method: "PUT",
+      body: JSON.stringify({ rates }),
+    }),
+
+  workerDaysOff: (from: string, to: string) =>
+    authedFetch<{ daysOff: DayOff[] }>(
+      `/api/app/worker/days-off?from=${from}&to=${to}`,
+    ).then((r) => r.daysOff),
+
+  toggleDayOff: (input: ToggleDayOff) =>
+    authedFetch<void>("/api/app/worker/days-off", {
+      method: "PUT",
+      body: JSON.stringify(input),
+    }),
+
+  saveWorkerLocation: (input: PreciseLocation) =>
+    authedFetch<void>("/api/app/worker/location", {
+      method: "POST",
+      body: JSON.stringify(input),
+    }),
+
+  markAvailabilityReviewed: () =>
+    authedFetch<void>("/api/app/worker/availability/reviewed", {
+      method: "POST",
+    }),
+
+  completeSetup: () =>
+    authedFetch<void>("/api/app/worker/setup/complete", { method: "POST" }),
 };

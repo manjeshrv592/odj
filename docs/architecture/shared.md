@@ -46,8 +46,11 @@ packages/shared/
     image? — slug auto) / `updateCategorySchema` (all optional, slug re-derives on
     rename).
   - `professionSchema` / `Profession` — a role under one category (id, categoryId,
-    name, slug, isActive, position). `createProfessionSchema` (name only) /
+    name, slug, isActive, position, + the admin price bounds `dailyMin/dailyMax/
+    hourlyMin/hourlyMax`, nullable INR ints). `createProfessionSchema` (name only) /
     `updateProfessionSchema` (name?, isActive?, position? for reorder).
+  - `updateProfessionPricingSchema` / `UpdateProfessionPricing` — set the four
+    price bounds; `superRefine`: each unit both-or-neither + `min ≤ max`, ≥ 0.
 - **Requirement fields** (cascading worker questions):
   - `requirementLevelSchema` (`catalog|category|profession`),
     `requirementInputTypeSchema` (`text|file|select`), `allowedFileTypeSchema`
@@ -89,7 +92,9 @@ packages/shared/
   - Worker: `workerSkillsStepSchema` (≥1 professionId), `workerLanguagesStepSchema`,
     `workerRequirementsStepSchema`, `workerProfileUpdateSchema` (partial per-step
     PATCH), `workerSubmitSchema` (static-field submit guard), `workerProfileSchema`
-    / `WorkerProfile` (full GET shape incl. `professionIds`, `status`, `currentStep`).
+    / `WorkerProfile` (full GET shape incl. `professionIds`, `status`, `currentStep`,
+    + the post-approval setup markers `locationCapturedAt` / `availabilityReviewedAt`
+    / `setupCompletedAt`).
   - Hirer: `hirerTypeStepSchema` (business ⇒ orgName; gstRegistered ⇒ valid GSTIN),
     `hirerProfileUpdateSchema`, `hirerSubmitSchema`, `hirerProfileSchema` / `HirerProfile`.
   - `selectRoleSchema` / `SelectRole` — `{ userType: worker|hirer }` (role pick).
@@ -113,6 +118,18 @@ packages/shared/
     (extensible).
   - `notificationSchema` / `Notification` — id, type, title, body, read, createdAt, data?.
   - `registerPushTokenSchema` / `RegisterPushToken` — `{ token, platform? }`.
+- **Approved-worker pricing / availability / location:**
+  - `workerRateRowSchema` / `WorkerRateRow` — one profession on the rates screen
+    (name + admin bounds per unit + the worker's current rates).
+    `workerRatesViewSchema` / `WorkerRatesView` — `GET /worker/rates` shape.
+    `setWorkerRatesSchema` / `SetWorkerRates` — `{ rates: { professionId,
+    dailyRate?, hourlyRate? }[] }` (bounds re-checked server-side).
+  - `isoDateSchema` — a `YYYY-MM-DD` calendar day. `dayOffScopeSchema` / `DayOffScope`
+    — `"all"` | a `professionId`. `dayOffSchema` / `DayOff` (`{ date, professionId|null }`)
+    + `daysOffViewSchema` / `DaysOffView` (`GET /worker/days-off`).
+    `toggleDayOffSchema` / `ToggleDayOff` — `{ date, scope, off }`.
+  - `preciseLocationSchema` / `PreciseLocation` — `{ lat, lng, accuracy? }`
+    (`POST /worker/location`; `capturedAt` set server-side).
 
 > Grows as features land. Prefer generating DB-owned shapes via `drizzle-zod`
 > (in backend) and re-exporting refined schemas here.

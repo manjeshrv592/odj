@@ -5,6 +5,7 @@ import {
   updateCategorySchema,
   createProfessionSchema,
   updateProfessionSchema,
+  updateProfessionPricingSchema,
   createRequirementFieldSchema,
   updateRequirementFieldSchema,
   requirementLevelSchema,
@@ -49,6 +50,10 @@ function toProfession(row: typeof professions.$inferSelect): Profession {
     slug: row.slug,
     isActive: row.isActive,
     position: row.position,
+    dailyMin: row.dailyMin,
+    dailyMax: row.dailyMax,
+    hourlyMin: row.hourlyMin,
+    hourlyMax: row.hourlyMax,
   };
 }
 
@@ -337,6 +342,30 @@ catalogRouter.patch(
       .where(eq(professions.id, id))
       .returning();
     res.json({ profession: toProfession(updated!) });
+  },
+);
+
+// PATCH /api/portal/catalog/professions/:id/pricing — set the admin price bounds
+// (INR whole rupees). Each unit is both-or-neither + min ≤ max (validated in the
+// schema); null both ⇒ that unit is not offered.
+catalogRouter.patch(
+  "/professions/:id/pricing",
+  async (req: Request, res: Response) => {
+    const parsed = updateProfessionPricingSchema.safeParse(req.body);
+    if (!parsed.success) return invalid(res, parsed.error);
+    const id = String(req.params.id);
+    const { dailyMin, dailyMax, hourlyMin, hourlyMax } = parsed.data;
+
+    const [updated] = await db
+      .update(professions)
+      .set({ dailyMin, dailyMax, hourlyMin, hourlyMax, updatedAt: new Date() })
+      .where(eq(professions.id, id))
+      .returning();
+    if (!updated) {
+      res.status(404).json({ error: "Profession not found" });
+      return;
+    }
+    res.json({ profession: toProfession(updated) });
   },
 );
 

@@ -60,7 +60,16 @@ function SessionGate({ children }: { children: React.ReactNode }) {
     }
 
     if (state.status === "approved") {
-      if (inAuthGroup || inOnboarding) router.replace("/");
+      // Only route on *arrival* from auth/onboarding (fresh login / just approved);
+      // don't bounce in-app navigation within the (worker) group. A worker who has
+      // finished/skipped setup lands on their home; otherwise the one-time
+      // "you're verified" screen (which leads into the setup dashboard).
+      if (inAuthGroup || inOnboarding) {
+        const setupDone = !!state.worker?.setupCompletedAt;
+        router.replace(
+          state.userType === "worker" && setupDone ? "/(worker)/home" : "/",
+        );
+      }
       return;
     }
 

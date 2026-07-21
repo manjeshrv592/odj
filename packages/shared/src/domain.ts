@@ -113,6 +113,12 @@ export const professionSchema = z.object({
   slug: slugFieldSchema,
   isActive: z.boolean().default(true),
   position: z.number().int(),
+  // Admin price bounds (INR whole rupees). A unit is "supported" only when both
+  // its min and max are set (see `updateProfessionPricingSchema`).
+  dailyMin: z.number().int().nullable().default(null),
+  dailyMax: z.number().int().nullable().default(null),
+  hourlyMin: z.number().int().nullable().default(null),
+  hourlyMax: z.number().int().nullable().default(null),
 });
 export type Profession = z.infer<typeof professionSchema>;
 
@@ -129,6 +135,41 @@ export const updateProfessionSchema = z.object({
   position: z.number().int().min(0).optional(),
 });
 export type UpdateProfession = z.infer<typeof updateProfessionSchema>;
+
+/**
+ * Set a profession's admin price bounds (INR whole rupees). Each unit's `min`
+ * and `max` are **both-or-neither** (sending one without the other is invalid);
+ * `null` for both clears/disables that unit. `min ≤ max`, values ≥ 0.
+ */
+export const updateProfessionPricingSchema = z
+  .object({
+    dailyMin: z.number().int().min(0).nullable(),
+    dailyMax: z.number().int().min(0).nullable(),
+    hourlyMin: z.number().int().min(0).nullable(),
+    hourlyMax: z.number().int().min(0).nullable(),
+  })
+  .superRefine((v, ctx) => {
+    for (const unit of ["daily", "hourly"] as const) {
+      const min = v[`${unit}Min`];
+      const max = v[`${unit}Max`];
+      if ((min === null) !== (max === null)) {
+        ctx.addIssue({
+          code: "custom",
+          path: [min === null ? `${unit}Min` : `${unit}Max`],
+          message: `Set both ${unit} min and max, or clear both`,
+        });
+      } else if (min !== null && max !== null && min > max) {
+        ctx.addIssue({
+          code: "custom",
+          path: [`${unit}Max`],
+          message: `${unit} max must be ≥ min`,
+        });
+      }
+    }
+  });
+export type UpdateProfessionPricing = z.infer<
+  typeof updateProfessionPricingSchema
+>;
 
 // ── Requirement fields (cascading worker questions) ──────────────────────────
 
@@ -575,6 +616,10 @@ export const workerProfileSchema = z.object({
   status: profileStatusSchema,
   currentStep: z.number().int(),
   rejectionReason: z.string().nullish(),
+  // Post-approval setup progress (drives the dashboard checkmarks + routing).
+  locationCapturedAt: z.coerce.date().nullish(),
+  availabilityReviewedAt: z.coerce.date().nullish(),
+  setupCompletedAt: z.coerce.date().nullish(),
 });
 export type WorkerProfile = z.infer<typeof workerProfileSchema>;
 
@@ -817,3 +862,95 @@ export const registerPushTokenSchema = z.object({
   platform: z.enum(["ios", "android", "web"]).nullish(),
 });
 export type RegisterPushToken = z.infer<typeof registerPushTokenSchema>;
+
+// ── Worker rates (post-approval pricing) ──────────────────────────────────────
+
+/**
+ * One profession on the worker's rates screen (GET /api/app/worker/rates): the
+ * profession name, the admin bounds per supported unit (null bound ⇒ unit not
+ * offered), and the worker's current rate for each unit (null ⇒ not set).
+ */
+export const workerRateRowSchema = z.object({
+  professionId: z.uuid(),
+  name: z.string(),
+  dailyMin: z.number().int().nullable(),
+  dailyMax: z.number().int().nullable(),
+  hourlyMin: z.number().int().nullable(),
+  hourlyMax: z.number().int().nullable(),
+  dailyRate: z.number().int().nullable(),
+  hourlyRate: z.number().int().nullable(),
+});
+export type WorkerRateRow = z.infer<typeof workerRateRowSchema>;
+
+/** GET /api/app/worker/rates response. */
+export const workerRatesViewSchema = z.object({
+  rates: z.array(workerRateRowSchema),
+});
+export type WorkerRatesView = z.infer<typeof workerRatesViewSchema>;
+
+/**
+ * Set worker rates (PUT /api/app/worker/rates). Each entry targets a profession
+ * the worker holds; a `null`/omitted unit clears it. Bound + supported-unit
+ * checks happen server-side against live profession bounds.
+ */
+export const setWorkerRatesSchema = z.object({
+  rates: z
+    .array(
+      z.object({
+        professionId: z.uuid(),
+        dailyRate: z.number().int().min(0).nullish(),
+        hourlyRate: z.number().int().min(0).nullish(),
+      }),
+    )
+    .max(50),
+});
+export type SetWorkerRates = z.infer<typeof setWorkerRatesSchema>;
+
+// ── Worker availability (days off) ────────────────────────────────────────────
+
+/** A calendar day in `YYYY-MM-DD` form (the storage shape for days off). */
+export const isoDateSchema = z
+  .string()
+  .regex(/^\d{4}-\d{2}-\d{2}$/, "Expected YYYY-MM-DD");
+
+/**
+ * Scope of a day off: `"all"` ⇒ off for every profession that day, otherwise a
+ * specific profession the worker holds.
+ */
+export const dayOffScopeSchema = z.union([z.literal("all"), z.uuid()]);
+export type DayOffScope = z.infer<typeof dayOffScopeSchema>;
+
+/** One stored day off (GET /api/app/worker/days-off). `professionId` null ⇒ all. */
+export const dayOffSchema = z.object({
+  date: isoDateSchema,
+  professionId: z.uuid().nullable(),
+});
+export type DayOff = z.infer<typeof dayOffSchema>;
+
+/** GET /api/app/worker/days-off response. */
+export const daysOffViewSchema = z.object({
+  daysOff: z.array(dayOffSchema),
+});
+export type DaysOffView = z.infer<typeof daysOffViewSchema>;
+
+/** Toggle a single day off on/off for a scope (PUT /api/app/worker/days-off). */
+export const toggleDayOffSchema = z.object({
+  date: isoDateSchema,
+  scope: dayOffScopeSchema,
+  off: z.boolean(),
+});
+export type ToggleDayOff = z.infer<typeof toggleDayOffSchema>;
+
+// ── Worker precise location (Phase 3) ─────────────────────────────────────────
+
+/**
+ * A precise foreground location capture (POST /api/app/worker/location).
+ * `accuracy` is the device-reported radius in metres; `capturedAt` is set
+ * server-side.
+ */
+export const preciseLocationSchema = z.object({
+  lat: z.number().min(-90).max(90),
+  lng: z.number().min(-180).max(180),
+  accuracy: z.number().min(0).nullish(),
+});
+export type PreciseLocation = z.infer<typeof preciseLocationSchema>;

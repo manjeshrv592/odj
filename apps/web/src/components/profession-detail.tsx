@@ -14,6 +14,7 @@ import { apiFetch } from "@/lib/api";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { RequirementFieldsPanel } from "@/components/requirement-fields-panel";
+import { ProfessionPricingPanel } from "@/components/profession-pricing-panel";
 
 const TYPE_META: Record<
   RequirementInputType,
@@ -156,6 +157,11 @@ export function ProfessionDetail({
           </div>
         )}
       </div>
+
+      <ProfessionPricingPanel
+        professionId={professionId}
+        profession={profession ?? undefined}
+      />
 
       <RequirementFieldsPanel
         level="profession"

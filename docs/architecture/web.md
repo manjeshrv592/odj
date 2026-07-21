@@ -44,7 +44,8 @@ apps/web/
     │   ├── catalog-overview.tsx # catalog landing: global requirements + categories grid
     │   ├── category-form-dialog.tsx # create/edit category (+ Uploadcare icon)
     │   ├── category-detail.tsx # professions list (CRUD/reorder) + category requirements
-    │   ├── profession-detail.tsx # inherited (read-only) + this profession's fields
+    │   ├── profession-detail.tsx # inherited (read-only) + pricing + this profession's fields
+    │   ├── profession-pricing-panel.tsx # admin price bounds (daily/hourly ₹ min-max)
     │   ├── requirement-fields-panel.tsx # reusable per-scope requirement-field CRUD
     │   ├── requirement-field-editor.tsx # add/edit field dialog (type-switched inputs)
     │   └── ui/             # shadcn components (button, input, select, checkbox, switch, textarea, sidebar, table, dialog, …)
@@ -106,8 +107,12 @@ apps/web/
 - `category-detail.tsx` — professions list (create, rename, hide/show, reorder
   up/down via `position` swap, delete) + a `level="category"` requirement panel.
 - `profession-detail.tsx` — reads `effective-requirements`; shows **Inherited**
-  fields read-only, grouped "From Catalog" / "From <Category>", above a
-  `level="profession"` requirement panel.
+  fields read-only, grouped "From Catalog" / "From <Category>", then the
+  `<ProfessionPricingPanel>`, above a `level="profession"` requirement panel.
+- `profession-pricing-panel.tsx` — admin price bounds for one profession (daily +
+  hourly ₹min/₹max). Both-or-neither per unit, client `min ≤ max` validation,
+  TanStack Query mutation → `PATCH …/professions/:id/pricing`; invalidates the
+  profession query on save. Reuses shadcn `Card/Input/Label/Button` + `sonner`.
 - `requirement-fields-panel.tsx` — **reusable** CRUD list for one scope (`level` +
   `categoryId?`/`professionId?`); add/edit/delete/hide/reorder, TanStack Query keyed
   by scope. Used at all three levels.
