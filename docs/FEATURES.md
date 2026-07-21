@@ -65,9 +65,27 @@ sub-items as scope is refined. `[x]` done · `[~]` in progress · `[ ]` not star
 
 ## 4. Hiring flow
 
+### Worker pricing, availability & location (matching prerequisites)
+
+- [x] Admin price bounds per profession — daily + hourly ₹ min/max on the
+  profession detail page (both-or-neither per unit, `min ≤ max`); constrains worker
+  rates. (Phase 1)
+- [x] Worker rates — approved worker sets a daily/hourly ₹ rate per profession,
+  validated client + server against the admin bounds (only admin-enabled units
+  shown). (Phase 1)
+- [x] Worker availability calendar — mark days off for all professions or a
+  specific profession (one-off dates; default = available). (Phase 2)
+- [x] Worker precise location — one-time high-accuracy foreground capture
+  (lat/lng + accuracy + capturedAt). (Phase 3)
+- [ ] Live/background location + "online now" presence toggle (Phase 4 — needs an
+  EAS dev build + `expo-task-manager`)
+
+### Hirer → worker matching
+
 - [ ] Search workers by category / filters
 - [ ] Worker profile view (with ratings)
-- [ ] Hire a worker
+- [ ] Hire a worker (Uber-style map + radius search + first-accept-wins offer —
+  Phase 4: needs maps API key + dev build + real-time layer)
 - [ ] Start-of-job OTP verification
 - [ ] End-of-job OTP verification
 
@@ -77,6 +95,19 @@ sub-items as scope is refined. `[x]` done · `[~]` in progress · `[ ]` not star
 - [ ] Platform fee calculation
 - [ ] Disburse payout to worker
 - [ ] Payment history / receipts
+
+> **Intended approach (Razorpay Route — escrow marketplace model).** Hirer pays the
+> full amount → held in Razorpay via a Route transfer with `on_hold: true` → released
+> to the worker on job completion (end-of-job OTP). The platform fee is simply the
+> amount not transferred (collect X, transfer Y, keep X−Y); factor in ~1% GST TCS +
+> ~1% TDS (194-O) on payouts. Workers are onboarded as **Linked Accounts** — collect
+> PAN + bank/IFSC in-app, **Razorpay does the KYC verification** (penny-drop, PAN,
+> AML); no government API/approval needed beyond the platform's own Razorpay KYC +
+> Route enablement. Settlement to the worker is ~T+2/T+3 business days after release
+> (Instant Settlement is a paid add-on). Most of this is buildable against **test
+> keys** before activation (KYC/real disbursement are simulated in test mode).
+> Interactive maps + real-time matching (Phase 4) are prerequisites for the job
+> lifecycle this hangs off.
 
 ## 6. Disputes
 

@@ -1,5 +1,5 @@
 import { Router, type Request, type Response } from "express";
-import { and, asc, desc, eq, inArray } from "drizzle-orm";
+import { and, asc, desc, eq, gte, inArray, isNull, lte } from "drizzle-orm";
 import {
   selectRoleSchema,
   workerProfileUpdateSchema,
@@ -9,12 +9,18 @@ import {
   hirerSubmitSchema,
   registerPushTokenSchema,
   notificationTypeSchema,
+  setWorkerRatesSchema,
+  toggleDayOffSchema,
+  preciseLocationSchema,
+  isoDateSchema,
   type Category,
   type Profession,
   type WorkerProfile,
   type HirerProfile,
   type OnboardingState,
   type Notification,
+  type WorkerRateRow,
+  type DayOff,
 } from "@odj/shared";
 import { db } from "../db";
 import {
@@ -22,6 +28,8 @@ import {
   professions,
   workerProfiles,
   workerProfessions,
+  workerProfessionRates,
+  workerDaysOff,
   hirerProfiles,
   pushTokens,
   notifications,
@@ -62,6 +70,10 @@ function toProfession(row: typeof professions.$inferSelect): Profession {
     slug: row.slug,
     isActive: row.isActive,
     position: row.position,
+    dailyMin: row.dailyMin,
+    dailyMax: row.dailyMax,
+    hourlyMin: row.hourlyMin,
+    hourlyMax: row.hourlyMax,
   };
 }
 
@@ -100,6 +112,9 @@ async function loadWorkerProfile(userId: string): Promise<WorkerProfile | null> 
     status: row.status,
     currentStep: row.currentStep,
     rejectionReason: row.rejectionReason,
+    locationCapturedAt: row.locationCapturedAt,
+    availabilityReviewedAt: row.availabilityReviewedAt,
+    setupCompletedAt: row.setupCompletedAt,
   };
 }
 
@@ -406,6 +421,278 @@ appRouter.post(
     res.json(await loadOnboardingState(u.id, "worker"));
   },
 );
+
+// ── Worker post-approval: rates, availability, location ────────────────────────
+
+/**
+ * Ensure the signed-in user has an *approved* worker profile. Rates, day-off
+ * availability, and precise location are only meaningful once verified, so these
+ * endpoints are gated separately from the editable (draft/rejected) onboarding.
+ */
+async function requireApprovedWorker(
+  userId: string,
+  res: Response,
+): Promise<typeof workerProfiles.$inferSelect | null> {
+  const [row] = await db
+    .select()
+    .from(workerProfiles)
+    .where(eq(workerProfiles.userId, userId))
+    .limit(1);
+  if (!row) {
+    res.status(404).json({ error: "No worker profile" });
+    return null;
+  }
+  if (row.status !== "approved") {
+    res.status(403).json({ error: "Profile not approved yet" });
+    return null;
+  }
+  return row;
+}
+
+/** A worker's chosen professions (id + name) — basis for rates & availability. */
+async function workerProfessionRows(workerProfileId: string) {
+  return db
+    .select({
+      id: professions.id,
+      name: professions.name,
+      dailyMin: professions.dailyMin,
+      dailyMax: professions.dailyMax,
+      hourlyMin: professions.hourlyMin,
+      hourlyMax: professions.hourlyMax,
+    })
+    .from(workerProfessions)
+    .innerJoin(professions, eq(workerProfessions.professionId, professions.id))
+    .where(eq(workerProfessions.workerProfileId, workerProfileId))
+    .orderBy(asc(professions.name));
+}
+
+// GET /api/app/worker/rates — the worker's professions with admin bounds + set rates.
+appRouter.get("/worker/rates", async (req: Request, res: Response) => {
+  const u = req.appUser!;
+  const profile = await requireApprovedWorker(u.id, res);
+  if (!profile) return;
+
+  const profs = await workerProfessionRows(profile.id);
+  const existing = await db
+    .select()
+    .from(workerProfessionRates)
+    .where(eq(workerProfessionRates.workerProfileId, profile.id));
+  const byProfession = new Map(existing.map((r) => [r.professionId, r]));
+
+  const rates: WorkerRateRow[] = profs.map((p) => {
+    const rate = byProfession.get(p.id);
+    return {
+      professionId: p.id,
+      name: p.name,
+      dailyMin: p.dailyMin,
+      dailyMax: p.dailyMax,
+      hourlyMin: p.hourlyMin,
+      hourlyMax: p.hourlyMax,
+      dailyRate: rate?.dailyRate ?? null,
+      hourlyRate: rate?.hourlyRate ?? null,
+    };
+  });
+  res.json({ rates });
+});
+
+// PUT /api/app/worker/rates — set rates (validated against live bounds + ownership).
+appRouter.put("/worker/rates", async (req: Request, res: Response) => {
+  const parsed = setWorkerRatesSchema.safeParse(req.body);
+  if (!parsed.success) return invalid(res, parsed.error);
+  const u = req.appUser!;
+  const profile = await requireApprovedWorker(u.id, res);
+  if (!profile) return;
+
+  const profs = await workerProfessionRows(profile.id);
+  const byId = new Map(profs.map((p) => [p.id, p]));
+
+  // Validate every entry before writing anything.
+  for (const entry of parsed.data.rates) {
+    const p = byId.get(entry.professionId);
+    if (!p) {
+      res.status(400).json({ error: "Not one of your professions" });
+      return;
+    }
+    const checks = [
+      { unit: "daily", rate: entry.dailyRate, min: p.dailyMin, max: p.dailyMax },
+      {
+        unit: "hourly",
+        rate: entry.hourlyRate,
+        min: p.hourlyMin,
+        max: p.hourlyMax,
+      },
+    ] as const;
+    for (const c of checks) {
+      if (c.rate === undefined || c.rate === null) continue;
+      if (c.min === null || c.max === null) {
+        res.status(400).json({ error: `${c.unit} rate not offered for ${p.name}` });
+        return;
+      }
+      if (c.rate < c.min || c.rate > c.max) {
+        res.status(400).json({
+          error: `${c.unit} rate for ${p.name} must be ₹${c.min}–₹${c.max}`,
+        });
+        return;
+      }
+    }
+  }
+
+  for (const entry of parsed.data.rates) {
+    await db
+      .insert(workerProfessionRates)
+      .values({
+        workerProfileId: profile.id,
+        professionId: entry.professionId,
+        dailyRate: entry.dailyRate ?? null,
+        hourlyRate: entry.hourlyRate ?? null,
+      })
+      .onConflictDoUpdate({
+        target: [
+          workerProfessionRates.workerProfileId,
+          workerProfessionRates.professionId,
+        ],
+        set: {
+          dailyRate: entry.dailyRate ?? null,
+          hourlyRate: entry.hourlyRate ?? null,
+          updatedAt: new Date(),
+        },
+      });
+  }
+
+  res.status(204).end();
+});
+
+// GET /api/app/worker/days-off?from=&to= — days off in the (inclusive) range.
+appRouter.get("/worker/days-off", async (req: Request, res: Response) => {
+  const u = req.appUser!;
+  const profile = await requireApprovedWorker(u.id, res);
+  if (!profile) return;
+
+  const from = isoDateSchema.safeParse(req.query.from);
+  const to = isoDateSchema.safeParse(req.query.to);
+  const where = [eq(workerDaysOff.workerProfileId, profile.id)];
+  if (from.success) where.push(gte(workerDaysOff.date, from.data));
+  if (to.success) where.push(lte(workerDaysOff.date, to.data));
+
+  const rows = await db
+    .select({ date: workerDaysOff.date, professionId: workerDaysOff.professionId })
+    .from(workerDaysOff)
+    .where(and(...where))
+    .orderBy(asc(workerDaysOff.date));
+
+  const daysOff: DayOff[] = rows.map((r) => ({
+    date: r.date,
+    professionId: r.professionId,
+  }));
+  res.json({ daysOff });
+});
+
+// PUT /api/app/worker/days-off — toggle one day off for a scope (all / profession).
+appRouter.put("/worker/days-off", async (req: Request, res: Response) => {
+  const parsed = toggleDayOffSchema.safeParse(req.body);
+  if (!parsed.success) return invalid(res, parsed.error);
+  const u = req.appUser!;
+  const profile = await requireApprovedWorker(u.id, res);
+  if (!profile) return;
+
+  const { date, scope, off } = parsed.data;
+  const professionId = scope === "all" ? null : scope;
+
+  if (professionId) {
+    const owns = await db
+      .select({ id: workerProfessions.professionId })
+      .from(workerProfessions)
+      .where(
+        and(
+          eq(workerProfessions.workerProfileId, profile.id),
+          eq(workerProfessions.professionId, professionId),
+        ),
+      )
+      .limit(1);
+    if (owns.length === 0) {
+      res.status(400).json({ error: "Not one of your professions" });
+      return;
+    }
+  }
+
+  // `professionId` is nullable, so match it explicitly (NULL = all-professions row).
+  const scopeMatch = and(
+    eq(workerDaysOff.workerProfileId, profile.id),
+    eq(workerDaysOff.date, date),
+    professionId === null
+      ? isNull(workerDaysOff.professionId)
+      : eq(workerDaysOff.professionId, professionId),
+  );
+
+  if (off) {
+    const existing = await db
+      .select({ id: workerDaysOff.id })
+      .from(workerDaysOff)
+      .where(scopeMatch)
+      .limit(1);
+    if (existing.length === 0) {
+      await db
+        .insert(workerDaysOff)
+        .values({ workerProfileId: profile.id, professionId, date });
+    }
+  } else {
+    await db.delete(workerDaysOff).where(scopeMatch);
+  }
+
+  res.status(204).end();
+});
+
+// POST /api/app/worker/location — high-accuracy precise location capture.
+appRouter.post("/worker/location", async (req: Request, res: Response) => {
+  const parsed = preciseLocationSchema.safeParse(req.body);
+  if (!parsed.success) return invalid(res, parsed.error);
+  const u = req.appUser!;
+  const profile = await requireApprovedWorker(u.id, res);
+  if (!profile) return;
+
+  const { lat, lng, accuracy } = parsed.data;
+  await db
+    .update(workerProfiles)
+    .set({
+      lat,
+      lng,
+      locationAccuracy: accuracy ?? null,
+      locationCapturedAt: new Date(),
+      updatedAt: new Date(),
+    })
+    .where(eq(workerProfiles.id, profile.id));
+
+  res.status(204).end();
+});
+
+// POST /api/app/worker/availability/reviewed — mark the (optional) day-off step
+// acknowledged (drives the dashboard checkmark). Idempotent.
+appRouter.post(
+  "/worker/availability/reviewed",
+  async (req: Request, res: Response) => {
+    const u = req.appUser!;
+    const profile = await requireApprovedWorker(u.id, res);
+    if (!profile) return;
+    await db
+      .update(workerProfiles)
+      .set({ availabilityReviewedAt: new Date(), updatedAt: new Date() })
+      .where(eq(workerProfiles.id, profile.id));
+    res.status(204).end();
+  },
+);
+
+// POST /api/app/worker/setup/complete — finish or skip the dashboard setup flow
+// (routes the worker to their home from now on). Idempotent.
+appRouter.post("/worker/setup/complete", async (req: Request, res: Response) => {
+  const u = req.appUser!;
+  const profile = await requireApprovedWorker(u.id, res);
+  if (!profile) return;
+  await db
+    .update(workerProfiles)
+    .set({ setupCompletedAt: new Date(), updatedAt: new Date() })
+    .where(eq(workerProfiles.id, profile.id));
+  res.status(204).end();
+});
 
 // ── Hirer draft saves ─────────────────────────────────────────────────────────
 

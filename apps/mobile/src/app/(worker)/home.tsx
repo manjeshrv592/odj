@@ -4,22 +4,18 @@ import { useRouter } from "expo-router";
 import { useQueryClient } from "@tanstack/react-query";
 import { signOut } from "@/lib/auth-client";
 import { ONBOARDING_STATE_KEY, NOTIFICATIONS_KEY } from "@/lib/app-api";
-import { useOnboardingState } from "@/lib/use-onboarding";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { NotificationsList } from "@/components/notifications-list";
 import { Text } from "@/components/ui/text";
 import { Button } from "@/components/ui/button";
 
 /**
- * Home for an approved worker/hirer. A verified **worker** can Continue into the
- * worker dashboard (set rates, availability, location). A verified **hirer**
- * stays on the "more coming soon" stub (the hirer hiring flow is Phase 4).
+ * Worker home — where a set-up worker lands. A Phase-4 job inbox lives here later;
+ * for now it's an "all set" state + notifications + a way back to setup.
  */
-export default function HomeScreen() {
+export default function WorkerHome() {
   const router = useRouter();
   const qc = useQueryClient();
-  const { data: state } = useOnboardingState();
-  const isWorker = state?.userType === "worker";
 
   async function handleSignOut() {
     await signOut();
@@ -32,22 +28,19 @@ export default function HomeScreen() {
     <SafeAreaView className="flex-1 bg-background">
       <ScrollView contentContainerClassName="gap-6 p-6">
         <View className="items-center gap-1 pt-6">
-          <Text className="text-5xl">🎉</Text>
+          <Text className="text-5xl">✅</Text>
           <Text className="text-2xl font-poppins-semibold text-foreground">
-            You&apos;re verified
+            You&apos;re all set
           </Text>
           <Text className="text-center text-muted-foreground">
-            {isWorker
-              ? "Your ODJ profile is approved. Set up your rates and availability to start getting hired."
-              : "Your ODJ profile is approved. More is coming soon."}
+            We&apos;ll notify you when a job comes your way. Job requests will show
+            up here soon.
           </Text>
         </View>
 
-        {isWorker ? (
-          <Button onPress={() => router.push("/dashboard")}>
-            <Text>Continue</Text>
-          </Button>
-        ) : null}
+        <Button variant="outline" onPress={() => router.push("/dashboard")}>
+          <Text>Manage rates &amp; availability</Text>
+        </Button>
 
         <View className="gap-2">
           <Text className="font-poppins-medium text-foreground">Notifications</Text>

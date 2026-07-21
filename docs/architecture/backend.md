@@ -118,6 +118,21 @@ apps/backend/
   - **Push + notifications:** `POST /push-tokens` (upsert this device's Expo token
     by `token`), `GET /notifications` (newest first), `POST /notifications/:id/read`,
     `POST /notifications/read-all`.
+  - **Approved-worker (post-verification):** gated by `requireApprovedWorker`
+    (status `approved`, distinct from the draft/rejected `requireEditableWorker`).
+    `GET /worker/rates` (the worker's professions joined to `professions` bounds +
+    their `worker_profession_rates`), `PUT /worker/rates` (validate each rate is for
+    a held profession, a supported unit, and within `[min,max]`; upsert).
+    `GET /worker/days-off?from=&to=` + `PUT /worker/days-off` (toggle one day off for
+    a scope — `all` ⇒ null `professionId`, else a held profession; NULL-aware
+    check-then-insert / delete). `POST /worker/location` (high-accuracy capture →
+    overwrite `lat`/`lng` + `location_accuracy` + `location_captured_at`).
+    `POST /worker/availability/reviewed` (ack the optional day-off step →
+    `availability_reviewed_at`) + `POST /worker/setup/complete` (finish/skip the
+    dashboard setup → `setup_completed_at`); both idempotent. `loadWorkerProfile`
+    projects these three timestamps for the dashboard checkmarks + home routing.
+    Helper `workerProfessionRows(workerProfileId)` joins the worker's professions
+    with their admin price bounds.
 
 ## src/routes/portal.ts
 - `portalRouter` (mounted `/api/portal`, all routes behind `requireAdmin`):
@@ -153,7 +168,9 @@ apps/backend/
     `DELETE /categories/:id` (hard delete — cascades to professions + fields).
   - **Professions:** `GET|POST /categories/:id/professions`,
     `PATCH /professions/:id` (rename/toggle/reorder via `position`),
-    `DELETE /professions/:id`.
+    `PATCH /professions/:id/pricing` (admin price bounds — daily/hourly min/max,
+    INR; both-or-neither + min ≤ max via `updateProfessionPricingSchema`),
+    `DELETE /professions/:id`. `toProfession` now projects the four pricing columns.
   - **Requirement fields:** `GET /requirement-fields?level=&categoryId=&professionId=`,
     `POST /requirement-fields` (generates the stable `key` + position),
     `PATCH /requirement-fields/:id` (key immutable; type-specific extras kept
@@ -206,7 +223,9 @@ apps/backend/
   `image` icon CDN url, isActive, timestamps).
 - `professions` — a role under one category (`category_id` FK → categories
   `ON DELETE CASCADE`, name, slug, isActive, `position`, timestamps). Unique index
-  on `(category_id, slug)`; index on `category_id`.
+  on `(category_id, slug)`; index on `category_id`. Also carries the admin price
+  bounds `daily_min`/`daily_max`/`hourly_min`/`hourly_max` (nullable integer, INR
+  whole rupees; a unit is "supported" only when both its min & max are set).
 - `requirementLevel` / `requirementInputType` — pgEnums.
 - `requirement_fields` — admin-authored worker questions for all three levels in
   one table: `level` enum, nullable `category_id` / `profession_id` FKs (both
@@ -219,11 +238,21 @@ apps/backend/
 - `worker_profiles` — one per user (`user_id` unique FK → user, cascade): names,
   `photo_url`, city/state, `lat`/`lng` (double precision), `languages` jsonb,
   `answers` jsonb (`Record<key, string|string[]>`), `status` (`profile_status`,
-  default `draft`), `current_step`, `submitted_at`, plus the verification columns
+  default `draft`), `current_step`, `submitted_at`, the verification columns
   `rejection_reason`, `reviewed_at`, `reviewed_by` (FK → user, `ON DELETE SET NULL`),
-  timestamps.
+  plus the Phase-3 precise-location metadata `location_accuracy` (metres) +
+  `location_captured_at` (the high-accuracy capture overwrites `lat`/`lng`), the
+  setup-flow markers `availability_reviewed_at` + `setup_completed_at` (migration
+  `0007_*`), and timestamps.
 - `worker_professions` — worker↔profession join (composite PK
   `(worker_profile_id, profession_id)`, both FKs cascade; index on profession).
+- `worker_profession_rates` — what an approved worker charges per profession
+  (composite PK `(worker_profile_id, profession_id)`, both FKs cascade): nullable
+  `daily_rate`/`hourly_rate` (INR whole rupees), timestamps; index on profession.
+- `worker_days_off` — days an approved worker is **not** working (`id`,
+  `worker_profile_id` FK cascade, nullable `profession_id` FK cascade — null ⇒ all
+  professions, `date` `YYYY-MM-DD`, `created_at`); index on `(worker_profile_id,
+  date)`. Default (no row) = available.
 - `hirer_profiles` — one per user: names, `photo_url`, city/state/lat/lng,
   `hirer_type`, `org_name`, `org_type`, `gst_registered`, `gstin`, `status`,
   `current_step`, `submitted_at`, the same `rejection_reason`/`reviewed_at`/
@@ -234,7 +263,9 @@ apps/backend/
   `body`, optional `data` jsonb, `read`, `created_at`; index on user).
 - Migration `0004_*` adds the three enums + `worker_profiles` /
   `worker_professions` / `hirer_profiles` tables. Migration `0005_*` adds the
-  verification columns + `push_tokens` / `notifications` tables.
+  verification columns + `push_tokens` / `notifications` tables. Migration `0006_*`
+  adds the `professions` price-bound columns, `worker_profiles` location-metadata
+  columns, and the `worker_profession_rates` / `worker_days_off` tables.
 
 ## src/db/auth-schema.ts
 - better-auth Drizzle tables: `user`, `session`, `account`, `verification`.

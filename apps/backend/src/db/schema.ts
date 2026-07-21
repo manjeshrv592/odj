@@ -7,6 +7,7 @@ import {
   integer,
   jsonb,
   timestamp,
+  date,
   doublePrecision,
   index,
   uniqueIndex,
@@ -48,6 +49,10 @@ export const categories = pgTable("categories", {
  * A Profession belongs to exactly one Category (Cab Driver → Driver). Name +
  * auto slug only. `slug` is unique per category; `position` orders within it.
  * Deleting a category cascades to its professions.
+ *
+ * Admin price bounds (INR whole rupees) constrain what a worker may charge for
+ * this profession. A unit (daily / hourly) is "supported" only when **both** its
+ * min and max are set; otherwise workers can't set a rate for it.
  */
 export const professions = pgTable(
   "professions",
@@ -60,6 +65,10 @@ export const professions = pgTable(
     slug: text("slug").notNull(),
     isActive: boolean("is_active").notNull().default(true),
     position: integer("position").notNull().default(0),
+    dailyMin: integer("daily_min"),
+    dailyMax: integer("daily_max"),
+    hourlyMin: integer("hourly_min"),
+    hourlyMax: integer("hourly_max"),
     createdAt: timestamp("created_at").notNull().defaultNow(),
     updatedAt: timestamp("updated_at").notNull().defaultNow(),
   },
@@ -179,6 +188,16 @@ export const workerProfiles = pgTable("worker_profiles", {
   reviewedBy: text("reviewed_by").references(() => user.id, {
     onDelete: "set null",
   }),
+  // Precise current location (Phase 3 — high-accuracy foreground capture). `lat`/
+  // `lng` are reused (overwritten with high-accuracy values); `locationAccuracy`
+  // is the reported radius in metres and `locationCapturedAt` its freshness.
+  locationAccuracy: doublePrecision("location_accuracy"),
+  locationCapturedAt: timestamp("location_captured_at"),
+  // Post-approval setup progress: `availabilityReviewedAt` is set when the worker
+  // opens the (optional) day-off calendar; `setupCompletedAt` is set when they
+  // finish or skip the dashboard setup flow (drives routing to the worker home).
+  availabilityReviewedAt: timestamp("availability_reviewed_at"),
+  setupCompletedAt: timestamp("setup_completed_at"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
@@ -202,6 +221,55 @@ export const workerProfessions = pgTable(
     primaryKey({ columns: [t.workerProfileId, t.professionId] }),
     index("worker_professions_profession_idx").on(t.professionId),
   ],
+);
+
+/**
+ * What an (approved) worker charges per profession (INR whole rupees). One row
+ * per (worker, profession); a unit is set only if the profession's admin bounds
+ * enable it and the value is within `[min, max]` (enforced server-side). Either
+ * rate may be null when the worker hasn't set that unit yet.
+ */
+export const workerProfessionRates = pgTable(
+  "worker_profession_rates",
+  {
+    workerProfileId: uuid("worker_profile_id")
+      .notNull()
+      .references(() => workerProfiles.id, { onDelete: "cascade" }),
+    professionId: uuid("profession_id")
+      .notNull()
+      .references(() => professions.id, { onDelete: "cascade" }),
+    dailyRate: integer("daily_rate"),
+    hourlyRate: integer("hourly_rate"),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+    updatedAt: timestamp("updated_at").notNull().defaultNow(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.workerProfileId, t.professionId] }),
+    index("worker_profession_rates_profession_idx").on(t.professionId),
+  ],
+);
+
+/**
+ * Days an (approved) worker is **not** working (Phase 2). One row per day off;
+ * `profession_id` null ⇒ off for **all** professions that day, else off only for
+ * that profession. Default (no row) = available. `date` is a calendar day
+ * (`YYYY-MM-DD`, string mode). Dedup of `(worker, profession, date)` is handled
+ * in the toggle endpoint (Postgres treats NULL as distinct).
+ */
+export const workerDaysOff = pgTable(
+  "worker_days_off",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    workerProfileId: uuid("worker_profile_id")
+      .notNull()
+      .references(() => workerProfiles.id, { onDelete: "cascade" }),
+    professionId: uuid("profession_id").references(() => professions.id, {
+      onDelete: "cascade",
+    }),
+    date: date("date", { mode: "string" }).notNull(),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+  },
+  (t) => [index("worker_days_off_worker_date_idx").on(t.workerProfileId, t.date)],
 );
 
 /**

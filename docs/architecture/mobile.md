@@ -10,7 +10,10 @@ TanStack Query, better-auth Expo client.
 > (city/state autodetect) — pickers + location declare permission strings via
 > `app.json` config plugins. The Uploadcare public key is read from
 > `EXPO_PUBLIC_UPLOADCARE_PUBLIC_KEY` (in `apps/mobile/.env` — Expo only auto-loads
-> a `.env` from the app dir, not the monorepo root).
+> a `.env` from the app dir, not the monorepo root). The approved-worker
+> availability calendar uses `react-native-calendars` (pure-JS, Expo-Go compatible —
+> no native module; bundled TS types), and the rates screen uses
+> `@react-native-community/slider` (bundled in Expo Go).
 
 > Expo is versioned — read `apps/mobile/AGENTS.md` (points at the exact SDK 56
 > docs) before writing framework code.
@@ -28,7 +31,14 @@ apps/mobile/
     ├── global.css         # @tailwind + shadcn/rnr theme tokens (:root/.dark)
     ├── app/
     │   ├── _layout.tsx    # root Stack + <SessionGate> (auth/onboarding routing)
-    │   ├── index.tsx      # approved home — "you're verified" + notifications list
+    │   ├── index.tsx      # approved home — "you're verified"; worker gets Continue → (worker)
+    │   ├── (worker)/      # approved-worker area (rates / availability / location)
+    │   │   ├── _layout.tsx     # Stack (headers hidden)
+    │   │   ├── dashboard.tsx   # setup hub: rates/availability/location + ✓ + Finish/Skip
+    │   │   ├── home.tsx        # worker home ("all set" + notifications; Phase-4 job inbox)
+    │   │   ├── rates.tsx       # set ₹ rates per profession (slider + input, bounds-validated)
+    │   │   ├── availability.tsx# month calendar — mark days off (all / per profession)
+    │   │   └── location.tsx    # high-accuracy precise location capture
     │   ├── (auth)/        # auth screens group
     │   │   ├── login.tsx    # Email/Phone choice (phone stubbed) → send OTP
     │   │   ├── otp.tsx      # enter OTP → signIn.emailOtp
@@ -54,6 +64,7 @@ apps/mobile/
         ├── api.ts         # API_URL + apiFetch() (public endpoints)
         ├── app-api.ts     # authed /api/app client (attaches session cookie) + appApi
         ├── use-onboarding.ts # useOnboardingState() query (GET /api/app/me)
+        ├── use-worker.ts  # useWorkerRates() + useWorkerDaysOff() (approved-worker queries)
         ├── use-notifications.ts # useNotifications() query (GET /api/app/notifications)
         ├── uploadcare.ts  # uploadToUploadcare() — expo-image-picker → Uploadcare CDN
         ├── storage.ts     # cross-platform storage (SecureStore native / localStorage web)
@@ -70,15 +81,49 @@ apps/mobile/
   `(auth)/continue`; `status:draft` → `(onboarding)/{worker|hirer}` (resumes at
   the saved step); `status:under_review` → `(onboarding)/under-review`;
   `status:rejected` → `(onboarding)/rejected` (but allows the `edit-worker`/
-  `edit-hirer` screens for re-submit); `status:approved` → `index`. Routing is
-  driven by the profile `status`, not the legacy `onboardingCompleted` boolean.
+  `edit-hirer` screens for re-submit); `status:approved` → `(worker)/home` if the
+  worker has finished/skipped setup (`worker.setupCompletedAt`), else `index` (the
+  one-time "you're verified" screen → setup dashboard). Only redirects on arrival
+  from the auth/onboarding groups, so in-app `(worker)` navigation isn't bounced.
+  Routing is driven by the profile `status`, not the legacy `onboardingCompleted`
+  boolean.
   Spinner while session + state load. (Push registration is deferred — see the note
   under `use-notifications.ts`.)
 
 ## src/app/index.tsx
-- `HomeScreen` — the approved-user home (stub): a "you're verified" state +
+- `HomeScreen` — the approved-user home: a "you're verified" state +
   `<NotificationsList>` + `<ThemeToggle>` + a sign-out button (clears the
-  onboarding + notifications caches → `(auth)/login`).
+  onboarding + notifications caches → `(auth)/login`). An approved **worker** also
+  gets a **Continue** button → `(worker)/dashboard`; a hirer stays on the stub
+  (the hirer hiring flow is Phase 4).
+
+## src/app/(worker)/
+- `_layout.tsx` — Stack, headers hidden. Reachable only when `status:approved`
+  (SessionGate only bounces the auth/onboarding groups).
+- `dashboard.tsx` — `WorkerDashboard`: setup hub. Cards link to rates/availability/
+  location, each showing a ✓ when done — rates (every priced profession has a rate,
+  from `useWorkerRates()`), availability (`worker.availabilityReviewedAt`), location
+  (`worker.locationCapturedAt`). Bottom button `appApi.completeSetup` →
+  `router.replace("/home")`; labelled "Finish" once rates+location are done, else
+  "Skip for now" (availability is optional).
+- `home.tsx` — `WorkerHome`: where a set-up worker lands ("you're all set" +
+  `<NotificationsList>` + `<ThemeToggle>` + sign out + "Manage rates & availability"
+  → dashboard). Placeholder for the Phase-4 job inbox.
+- `rates.tsx` — `WorkerRatesScreen`: `useWorkerRates()`; per profession renders only
+  admin-enabled units (₹ daily/hourly) as a `@react-native-community/slider` bounded
+  to [min,max] synced with a number `Input` + client validation; Save →
+  `appApi.saveWorkerRates` (server re-checks bounds) → back.
+- `availability.tsx` — `WorkerAvailabilityScreen`: `react-native-calendars`
+  `<Calendar>` (themed from `useTheme` tokens) + a scope `Select` (All professions /
+  a specific profession); `markedDates` from `useWorkerDaysOff(from,to)` for the
+  visible month; tap a day → `appApi.toggleDayOff` + invalidate. `minDate` = today.
+  On mount calls `appApi.markAvailabilityReviewed` (flips the dashboard ✓).
+- `location.tsx` — `WorkerLocationScreen`: high-accuracy foreground capture
+  (`expo-location` `getCurrentPositionAsync({ accuracy: High })`) → `appApi
+  .saveWorkerLocation` → invalidates onboarding state; shows stored coords +
+  accuracy + a "map preview coming soon" card (the interactive map is Phase 4). No
+  reverse-geocode (this is the precise coordinate, vs the onboarding
+  `LocationPicker`'s city/state).
 
 ## src/app/(auth)/
 - `login.tsx` — Email/Phone choice (phone shows the not-available message);
@@ -162,8 +207,17 @@ apps/mobile/
 - `appApi` — typed functions for the onboarding flow: `me`, `selectRole`,
   `categories`, `professions`, `effectiveRequirements`, `saveWorker`,
   `saveWorkerProfessions`, `submitWorker`, `saveHirer`, `submitHirer`, plus
-  notifications: `notifications`, `markNotificationRead`, `markAllNotificationsRead`.
-- `ONBOARDING_STATE_KEY` / `NOTIFICATIONS_KEY` — TanStack Query keys.
+  notifications: `notifications`, `markNotificationRead`, `markAllNotificationsRead`,
+  and the approved-worker calls: `workerRates`, `saveWorkerRates`, `workerDaysOff`,
+  `toggleDayOff`, `saveWorkerLocation`, `markAvailabilityReviewed`, `completeSetup`.
+- `ONBOARDING_STATE_KEY` / `NOTIFICATIONS_KEY` / `WORKER_RATES_KEY` /
+  `WORKER_DAYS_OFF_KEY` — TanStack Query keys.
+
+## src/lib/use-worker.ts
+- `useWorkerRates()` — `useQuery` over `appApi.workerRates` (the worker's
+  professions + admin bounds + set rates). `useWorkerDaysOff(from,to)` — days off in
+  a date range (calendar marking). Both enabled once a session exists; the backend
+  further gates on an approved worker profile.
 
 ## src/lib/use-onboarding.ts
 - `useOnboardingState()` — `useQuery` over `appApi.me` (enabled once a session
