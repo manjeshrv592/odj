@@ -16,6 +16,7 @@ import {
 import { Providers } from "@/components/providers";
 import { useSession } from "@/lib/auth-client";
 import { useOnboardingState } from "@/lib/use-onboarding";
+import { usePushRegistration } from "@/lib/use-push";
 
 /**
  * Auth/onboarding routing gate. Watches the better-auth session and the mobile
@@ -38,6 +39,9 @@ function SessionGate({ children }: { children: React.ReactNode }) {
   const { data: state, isLoading: stateLoading } = useOnboardingState();
   const segments = useSegments();
   const router = useRouter();
+
+  // Register this device's Expo push token once signed in (best-effort).
+  usePushRegistration();
 
   useEffect(() => {
     if (isPending) return;

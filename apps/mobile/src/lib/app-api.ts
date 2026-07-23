@@ -135,6 +135,12 @@ export const appApi = {
   markAllNotificationsRead: () =>
     authedFetch<void>("/api/app/notifications/read-all", { method: "POST" }),
 
+  registerPushToken: (token: string, platform?: "ios" | "android" | "web") =>
+    authedFetch<void>("/api/app/push-tokens", {
+      method: "POST",
+      body: JSON.stringify({ token, platform }),
+    }),
+
   // ── Approved-worker: rates, availability, location ──────────────────────────
   workerRates: () =>
     authedFetch<{ rates: WorkerRateRow[] }>("/api/app/worker/rates").then(
