@@ -31,14 +31,23 @@ apps/mobile/
     ├── global.css         # @tailwind + shadcn/rnr theme tokens (:root/.dark)
     ├── app/
     │   ├── _layout.tsx    # root Stack + <SessionGate> (auth/onboarding routing)
-    │   ├── index.tsx      # approved home — "you're verified"; worker gets Continue → (worker)
-    │   ├── (worker)/      # approved-worker area (rates / availability / location)
-    │   │   ├── _layout.tsx     # Stack (headers hidden)
-    │   │   ├── dashboard.tsx   # setup hub: rates/availability/location + ✓ + Finish/Skip
-    │   │   ├── home.tsx        # worker home ("all set" + notifications; Phase-4 job inbox)
+    │   ├── index.tsx      # root spinner — SessionGate redirects approved users to their tab home
+    │   ├── (hirer)/       # approved-hirer tabs: Home / Jobs / Profile
+    │   │   ├── _layout.tsx     # Tabs (Home/Jobs/Profile; professions+search are href:null)
+    │   │   ├── index.tsx       # Home tab: active-job banner + pick a category
+    │   │   ├── jobs.tsx        # Jobs tab: Active/Completed/Cancelled (<JobList>)
+    │   │   ├── profile.tsx     # Profile tab: notifications + theme + sign out
+    │   │   ├── professions.tsx # pick a profession → POST /jobs → search (push-only)
+    │   │   └── search.tsx      # live "searching…" → matched (start OTP) → in_progress (end OTP)
+    │   ├── (worker)/      # approved-worker tabs: Home / Jobs / Profile
+    │   │   ├── _layout.tsx     # Tabs (Home/Jobs/Profile; rates/availability/location/job href:null)
+    │   │   ├── home.tsx        # Home tab: Go-online toggle, offers, active-job card
+    │   │   ├── jobs.tsx        # Jobs tab: Active/Completed/Cancelled (<JobList>)
+    │   │   ├── profile.tsx     # Profile tab: setup links (rates/availability/location) + notifications + account
     │   │   ├── rates.tsx       # set ₹ rates per profession (slider + input, bounds-validated)
     │   │   ├── availability.tsx# month calendar — mark days off (all / per profession)
-    │   │   └── location.tsx    # high-accuracy precise location capture
+    │   │   ├── location.tsx    # high-accuracy precise location capture
+    │   │   └── job.tsx         # active job: map to hirer, Start-work gate, verify start/end OTP
     │   ├── (auth)/        # auth screens group
     │   │   ├── login.tsx    # Email/Phone choice (phone stubbed) → send OTP
     │   │   ├── otp.tsx      # enter OTP → signIn.emailOtp
@@ -64,7 +73,8 @@ apps/mobile/
         ├── api.ts         # API_URL + apiFetch() (public endpoints)
         ├── app-api.ts     # authed /api/app client (attaches session cookie) + appApi
         ├── use-onboarding.ts # useOnboardingState() query (GET /api/app/me)
-        ├── use-worker.ts  # useWorkerRates() + useWorkerDaysOff() (approved-worker queries)
+        ├── use-worker.ts  # useWorkerRates/DaysOff/Offers/Job() (worker queries + active job poll)
+        ├── use-hirer.ts   # useJob() — polls a hiring job through its live lifecycle
         ├── use-notifications.ts # useNotifications() query (GET /api/app/notifications)
         ├── uploadcare.ts  # uploadToUploadcare() — expo-image-picker → Uploadcare CDN
         ├── storage.ts     # cross-platform storage (SecureStore native / localStorage web)
@@ -81,34 +91,48 @@ apps/mobile/
   `(auth)/continue`; `status:draft` → `(onboarding)/{worker|hirer}` (resumes at
   the saved step); `status:under_review` → `(onboarding)/under-review`;
   `status:rejected` → `(onboarding)/rejected` (but allows the `edit-worker`/
-  `edit-hirer` screens for re-submit); `status:approved` → `(worker)/home` if the
-  worker has finished/skipped setup (`worker.setupCompletedAt`), else `index` (the
-  one-time "you're verified" screen → setup dashboard). Only redirects on arrival
-  from the auth/onboarding groups, so in-app `(worker)` navigation isn't bounced.
-  Routing is driven by the profile `status`, not the legacy `onboardingCompleted`
-  boolean.
+  `edit-hirer` screens for re-submit); `status:approved` → the role's tab home
+  (`(worker)/home` or `(hirer)`). Only redirects on *arrival* (auth/onboarding groups
+  or the root `/`), so in-app tab navigation isn't bounced. Routing is driven by the
+  profile `status`, not the legacy `onboardingCompleted`/`setupCompletedAt` flags.
   Spinner while session + state load. (Push registration is deferred — see the note
   under `use-notifications.ts`.)
 
 ## src/app/index.tsx
-- `HomeScreen` — the approved-user home: a "you're verified" state +
-  `<NotificationsList>` + `<ThemeToggle>` + a sign-out button (clears the
-  onboarding + notifications caches → `(auth)/login`). An approved **worker** also
-  gets a **Continue** button → `(worker)/dashboard`; a hirer stays on the stub
-  (the hirer hiring flow is Phase 4).
+- `HomeScreen` — a transient spinner at `/`. `SessionGate` redirects approved users
+  to their role's tab home (`/(worker)/home` or `/(hirer)`); non-approved states are
+  routed to auth/onboarding.
 
 ## src/app/(worker)/
-- `_layout.tsx` — Stack, headers hidden. Reachable only when `status:approved`
-  (SessionGate only bounces the auth/onboarding groups).
-- `dashboard.tsx` — `WorkerDashboard`: setup hub. Cards link to rates/availability/
-  location, each showing a ✓ when done — rates (every priced profession has a rate,
-  from `useWorkerRates()`), availability (`worker.availabilityReviewedAt`), location
-  (`worker.locationCapturedAt`). Bottom button `appApi.completeSetup` →
-  `router.replace("/home")`; labelled "Finish" once rates+location are done, else
-  "Skip for now" (availability is optional).
-- `home.tsx` — `WorkerHome`: where a set-up worker lands ("you're all set" +
-  `<NotificationsList>` + `<ThemeToggle>` + sign out + "Manage rates & availability"
-  → dashboard). Placeholder for the Phase-4 job inbox.
+- `_layout.tsx` — `Tabs` (Home / Jobs / Profile; emoji tab icons themed via
+  `useTheme`). rates/availability/location/job are `href:null` (push-only).
+- `home.tsx` — `WorkerHome` (Home tab): **"Go online"** `Switch` (`appApi.setOnline`,
+  seeded from `worker.isOnline`); while online, an "Incoming requests" section polls
+  `useWorkerOffers` (3s) with Accept/Decline (accept → `/(worker)/job`). An
+  **active-job card** (`useWorkerJob`) links to it.
+- `jobs.tsx` — `WorkerJobs` (Jobs tab): `<JobList keyBase="worker">` (Active/Completed/
+  Cancelled); active rows → `/job`.
+- `profile.tsx` — `WorkerProfile` (Profile tab): setup links (rates/availability/
+  location, each with a ✓ when done) + `<NotificationsList>` + theme + sign out.
+- `job.tsx` — `WorkerJobScreen` (`useWorkerJob`, 3s poll). `<Map>` to the hirer; by
+  status: `matched` + !`startRequested` → **"Start work"** (`appApi.requestStart`);
+  then enter the start OTP (`OtpInput` → `verifyStart`); `in_progress` → end OTP →
+  `verifyEnd`; local "Job complete ✅" on end; Cancel (`cancelWorkerJob`).
+
+## src/app/(hirer)/
+- `_layout.tsx` — `Tabs` (Home / Jobs / Profile; professions+search are `href:null`).
+- `index.tsx` — `HirerBrowse` (Home tab): an **active-job banner** (poll
+  `appApi.hirerJobs("active")`) → resume `search`, plus the category list (reuse
+  `appApi.categories`) → tap → professions.
+- `jobs.tsx` — `HirerJobs` (Jobs tab): `<JobList keyBase="hirer">`; active rows →
+  `search?jobId`.
+- `profile.tsx` — `HirerProfile` (Profile tab): `<NotificationsList>` + theme + sign out.
+- `professions.tsx` — `HirerProfessions` (`?categoryId`): professions in the category;
+  tapping one `appApi.createJob({ professionId, hirer lat/lng })` → search.
+- `search.tsx` — `HirerSearch` (`?jobId`): `<Map>` centered on the hirer; `useJob`
+  polls every 2s through the lifecycle — "searching…" → matched (worker pin + the
+  **start code to show** `otpToShow`) → in_progress (**end code to show**) →
+  completed / cancelled, plus "no workers"/"expired". Cancel → `appApi.cancelJob`.
 - `rates.tsx` — `WorkerRatesScreen`: `useWorkerRates()`; per profession renders only
   admin-enabled units (₹ daily/hourly) as a `@react-native-community/slider` bounded
   to [min,max] synced with a number `Input` + client validation; Save →
@@ -209,7 +233,11 @@ apps/mobile/
   `saveWorkerProfessions`, `submitWorker`, `saveHirer`, `submitHirer`, plus
   notifications: `notifications`, `markNotificationRead`, `markAllNotificationsRead`,
   and the approved-worker calls: `workerRates`, `saveWorkerRates`, `workerDaysOff`,
-  `toggleDayOff`, `saveWorkerLocation`, `markAvailabilityReviewed`, `completeSetup`.
+  `toggleDayOff`, `saveWorkerLocation`, `markAvailabilityReviewed`, `completeSetup`,
+  the matching calls: `setOnline`, `workerOffers`, `acceptOffer`, `declineOffer`,
+  `createJob`, `job`, `cancelJob`, the job-lifecycle calls: `workerJob`, `requestStart`,
+  `verifyStart`, `verifyEnd`, `cancelWorkerJob`, and the job lists: `workerJobs(filter)`
+  / `hirerJobs(filter)` (+ `WORKER_OFFERS_KEY` / `WORKER_JOB_KEY` / `JOB_KEY`).
 - `ONBOARDING_STATE_KEY` / `NOTIFICATIONS_KEY` / `WORKER_RATES_KEY` /
   `WORKER_DAYS_OFF_KEY` — TanStack Query keys.
 
@@ -235,7 +263,18 @@ apps/mobile/
 
 ## src/components/notifications-list.tsx
 - `NotificationsList` — renders `useNotifications()`; unread rows highlighted
-  (primary border + dot), tapping marks read (`appApi.markNotificationRead`).
+  (primary border + dot), tapping marks read (`appApi.markNotificationRead`). Now
+  shows **account notices only** (verification decisions) — job events are push-only
+  (`pushUser`), surfaced by the live job screens + the Jobs tab. Lives in the Profile tab.
+
+## src/components/job-list.tsx
+- `JobList` — the Active/Completed/Cancelled list shared by the worker + hirer Jobs
+  tabs: a `<Segmented>` filter + rows (profession + counterpart + date + status);
+  `fetcher(filter)` supplies the role's jobs; `onOpenActive` makes active rows resume
+  the live job. Active filter polls every 5s.
+
+## src/components/ui/segmented.tsx
+- `Segmented<T>` — iOS-style segmented control (row of pill options, one selected).
 
 ## src/lib/uploadcare.ts
 - `uploadToUploadcare(asset)` — `expo-file-system` `new File(uri).upload(...)`

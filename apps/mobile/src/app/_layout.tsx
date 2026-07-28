@@ -16,6 +16,7 @@ import {
 import { Providers } from "@/components/providers";
 import { useSession } from "@/lib/auth-client";
 import { useOnboardingState } from "@/lib/use-onboarding";
+import { usePushRegistration } from "@/lib/use-push";
 
 /**
  * Auth/onboarding routing gate. Watches the better-auth session and the mobile
@@ -39,6 +40,9 @@ function SessionGate({ children }: { children: React.ReactNode }) {
   const segments = useSegments();
   const router = useRouter();
 
+  // Register this device's Expo push token once signed in (best-effort).
+  usePushRegistration();
+
   useEffect(() => {
     if (isPending) return;
 
@@ -60,14 +64,12 @@ function SessionGate({ children }: { children: React.ReactNode }) {
     }
 
     if (state.status === "approved") {
-      // Only route on *arrival* from auth/onboarding (fresh login / just approved);
-      // don't bounce in-app navigation within the (worker) group. A worker who has
-      // finished/skipped setup lands on their home; otherwise the one-time
-      // "you're verified" screen (which leads into the setup dashboard).
-      if (inAuthGroup || inOnboarding) {
-        const setupDone = !!state.worker?.setupCompletedAt;
+      // Route to the role's tab home on *arrival* (fresh login / just approved /
+      // the root index); don't bounce in-app navigation within the tab groups.
+      const onEntry = inAuthGroup || inOnboarding || seg.length === 0;
+      if (onEntry) {
         router.replace(
-          state.userType === "worker" && setupDone ? "/(worker)/home" : "/",
+          state.userType === "hirer" ? "/(hirer)" : "/(worker)/home",
         );
       }
       return;

@@ -33,15 +33,14 @@ export async function createNotification(
 }
 
 /**
- * Create the in-app notification *and* push to every device the user has
- * registered. Push is best-effort (see `sendExpoPush`).
+ * Push to every device the user has registered — **without** persisting an in-app
+ * row. For transient, real-time events (job offers/status) that are surfaced by
+ * live screens + the job lists, so the notifications list stays uncluttered.
  */
-export async function notifyUser(
+export async function pushUser(
   userId: string,
   input: NotificationInput,
 ): Promise<void> {
-  await createNotification(userId, input);
-
   const tokens = await db
     .select({ token: pushTokens.token })
     .from(pushTokens)
@@ -51,4 +50,17 @@ export async function notifyUser(
     tokens.map((t) => t.token),
     { title: input.title, body: input.body, data: input.data },
   );
+}
+
+/**
+ * Create the in-app notification *and* push to every device the user has
+ * registered. Push is best-effort (see `sendExpoPush`). Use for account notices
+ * (verification decisions) that belong in the persistent notifications list.
+ */
+export async function notifyUser(
+  userId: string,
+  input: NotificationInput,
+): Promise<void> {
+  await createNotification(userId, input);
+  await pushUser(userId, input);
 }

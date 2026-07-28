@@ -9,6 +9,7 @@ import { useOnboardingState } from "@/lib/use-onboarding";
 import { Text } from "@/components/ui/text";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { Map } from "@/components/map";
 
 type Captured = { lat: number; lng: number; accuracy: number | null };
 
@@ -103,12 +104,15 @@ export default function WorkerLocationScreen() {
           )}
         </Card>
 
-        <Card className="items-center gap-1 py-8">
-          <Text className="text-3xl">🗺️</Text>
-          <Text className="text-sm text-muted-foreground">
-            Map preview coming soon
-          </Text>
-        </Card>
+        {hasStored ? (
+          <View className="h-64 overflow-hidden rounded-2xl border border-border">
+            <Map
+              center={{ lat: worker!.lat!, lng: worker!.lng! }}
+              markers={[{ lat: worker!.lat!, lng: worker!.lng! }]}
+              zoom={14}
+            />
+          </View>
+        ) : null}
       </ScrollView>
 
       <View className="gap-2 p-6">

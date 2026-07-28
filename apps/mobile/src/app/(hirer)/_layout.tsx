@@ -2,13 +2,12 @@ import { Tabs } from "expo-router";
 import { Text } from "react-native";
 import { useTheme } from "@/components/providers";
 
-/** Emoji tab icon (no icon-font dependency). */
 function TabEmoji({ emoji }: { emoji: string }) {
   return <Text style={{ fontSize: 20 }}>{emoji}</Text>;
 }
 
-/** Approved-worker area — bottom tabs: Home / Jobs / Profile. */
-export default function WorkerLayout() {
+/** Approved-hirer area — bottom tabs: Home / Jobs / Profile. */
+export default function HirerLayout() {
   const { colorScheme } = useTheme();
   const dark = colorScheme === "dark";
 
@@ -25,8 +24,8 @@ export default function WorkerLayout() {
       }}
     >
       <Tabs.Screen
-        name="home"
-        options={{ title: "Home", tabBarIcon: () => <TabEmoji emoji="🏠" /> }}
+        name="index"
+        options={{ title: "Home", tabBarIcon: () => <TabEmoji emoji="🔍" /> }}
       />
       <Tabs.Screen
         name="jobs"
@@ -36,11 +35,8 @@ export default function WorkerLayout() {
         name="profile"
         options={{ title: "Profile", tabBarIcon: () => <TabEmoji emoji="👤" /> }}
       />
-      {/* Non-tab screens (navigated to via push). */}
-      <Tabs.Screen name="rates" options={{ href: null }} />
-      <Tabs.Screen name="availability" options={{ href: null }} />
-      <Tabs.Screen name="location" options={{ href: null }} />
-      <Tabs.Screen name="job" options={{ href: null }} />
+      <Tabs.Screen name="professions" options={{ href: null }} />
+      <Tabs.Screen name="search" options={{ href: null }} />
     </Tabs>
   );
 }

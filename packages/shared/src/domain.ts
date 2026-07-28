@@ -620,6 +620,7 @@ export const workerProfileSchema = z.object({
   locationCapturedAt: z.coerce.date().nullish(),
   availabilityReviewedAt: z.coerce.date().nullish(),
   setupCompletedAt: z.coerce.date().nullish(),
+  isOnline: z.boolean().default(false),
 });
 export type WorkerProfile = z.infer<typeof workerProfileSchema>;
 
@@ -841,6 +842,11 @@ export type VerificationDetail = z.infer<typeof verificationDetailSchema>;
 export const notificationTypeSchema = z.enum([
   "profile_approved",
   "profile_rejected",
+  "job_offer",
+  "job_matched",
+  "job_started",
+  "job_completed",
+  "job_cancelled",
 ]);
 export type NotificationType = z.infer<typeof notificationTypeSchema>;
 
@@ -954,3 +960,110 @@ export const preciseLocationSchema = z.object({
   accuracy: z.number().min(0).nullish(),
 });
 export type PreciseLocation = z.infer<typeof preciseLocationSchema>;
+
+// ── Hiring / matching (jobs + offers) ─────────────────────────────────────────
+
+/** Worker presence — only online workers receive job offers. */
+export const setOnlineSchema = z.object({ online: z.boolean() });
+export type SetOnline = z.infer<typeof setOnlineSchema>;
+
+export const jobStatusSchema = z.enum([
+  "searching",
+  "matched",
+  "in_progress",
+  "completed",
+  "cancelled",
+  "expired",
+  "no_workers",
+]);
+export type JobStatus = z.infer<typeof jobStatusSchema>;
+
+export const offerStatusSchema = z.enum([
+  "pending",
+  "accepted",
+  "declined",
+  "cancelled",
+  "expired",
+]);
+export type OfferStatus = z.infer<typeof offerStatusSchema>;
+
+/** Create a hiring search for one profession, centered on the hirer's location. */
+export const createJobSchema = z.object({
+  professionId: z.uuid(),
+  lat: z.number().min(-90).max(90),
+  lng: z.number().min(-180).max(180),
+});
+export type CreateJob = z.infer<typeof createJobSchema>;
+
+/**
+ * Job state the hirer polls (GET /api/app/jobs/:id). `matchedWorker` is present
+ * from `matched` on (name + live pin). `otpToShow` is the code the hirer displays
+ * for the worker to type: the start OTP while `matched`, the end OTP while
+ * `in_progress`, otherwise null.
+ */
+export const jobViewSchema = z.object({
+  id: z.uuid(),
+  status: jobStatusSchema,
+  professionId: z.uuid(),
+  matchedWorker: z
+    .object({
+      name: z.string(),
+      lat: z.number().nullish(),
+      lng: z.number().nullish(),
+    })
+    .nullish(),
+  otpToShow: z.string().nullish(),
+});
+export type JobView = z.infer<typeof jobViewSchema>;
+
+/** The worker's current active job (GET /api/app/worker/job) — where to go. */
+export const workerJobViewSchema = z.object({
+  id: z.uuid(),
+  status: jobStatusSchema,
+  professionName: z.string(),
+  hirer: z.object({
+    name: z.string(),
+    lat: z.number().nullish(),
+    lng: z.number().nullish(),
+  }),
+  // True once the worker has tapped "Start work" (reveals the start OTP flow).
+  startRequested: z.boolean(),
+});
+export type WorkerJobView = z.infer<typeof workerJobViewSchema>;
+
+/** A row in a worker/hirer job list (active / completed / cancelled). */
+export const jobListFilterSchema = z.enum(["active", "completed", "cancelled"]);
+export type JobListFilter = z.infer<typeof jobListFilterSchema>;
+
+export const jobListItemSchema = z.object({
+  id: z.uuid(),
+  status: jobStatusSchema,
+  professionName: z.string(),
+  counterpartName: z.string(),
+  createdAt: z.coerce.date(),
+});
+export type JobListItem = z.infer<typeof jobListItemSchema>;
+
+export const jobsListViewSchema = z.object({ jobs: z.array(jobListItemSchema) });
+export type JobsListView = z.infer<typeof jobsListViewSchema>;
+
+/** Enter the 4-digit start/end OTP the hirer shows. */
+export const verifyOtpSchema = z.object({
+  code: z.string().regex(/^\d{4}$/, "Enter the 4-digit code"),
+});
+export type VerifyOtp = z.infer<typeof verifyOtpSchema>;
+
+/** One pending offer as the worker sees it (GET /api/app/worker/offers). */
+export const workerOfferSchema = z.object({
+  offerId: z.uuid(),
+  jobId: z.uuid(),
+  professionName: z.string(),
+  distanceKm: z.number(),
+  createdAt: z.coerce.date(),
+});
+export type WorkerOffer = z.infer<typeof workerOfferSchema>;
+
+export const workerOffersViewSchema = z.object({
+  offers: z.array(workerOfferSchema),
+});
+export type WorkerOffersView = z.infer<typeof workerOffersViewSchema>;

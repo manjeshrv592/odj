@@ -133,6 +133,31 @@ apps/backend/
     projects these three timestamps for the dashboard checkmarks + home routing.
     Helper `workerProfessionRows(workerProfileId)` joins the worker's professions
     with their admin price bounds.
+  - **Matching (hiring flow):** `requireApprovedHirer` guard + `loadJobView(jobId)`
+    projection. **Worker:** `POST /worker/online` (`is_online` presence),
+    `GET /worker/offers` (pending offers on still-open jobs + Haversine distance),
+    `POST /worker/offers/:id/accept` (**race-safe first-accept-wins**: a tx flips the
+    job out of `searching` via a conditional UPDATE, accepts this offer, cancels the
+    rest, pushes `job_matched` to the hirer), `POST /worker/offers/:id/decline`.
+    **Hirer:** `POST /jobs` (find eligible workers via `lib/matching`, create job +
+    offers, push `job_offer` to each), `GET /jobs/:id` (poll; lazy-expires stale
+    searches; includes `matchedWorker` + `otpToShow` for the current phase),
+    `POST /jobs/:id/cancel` (searching/matched/in_progress; notifies the worker).
+  - **Job lifecycle (start/end OTP):** on accept the job gets 4-digit `start_otp` +
+    `end_otp` (`make4DigitOtp`); the hirer *shows* them, the worker *enters* them. The
+    hirer's start code stays hidden until the worker taps **Start work**
+    (`POST /worker/job/:id/request-start` sets `start_requested_at`; `loadJobView`
+    gates `otpToShow` on it; `workerJobView` exposes `startRequested`).
+    `GET /worker/job` (active matched/in_progress job → `workerJobView`),
+    `POST /worker/job/:id/verify-start` (requires start requested; code==start_otp →
+    `in_progress`, push hirer `job_started`), `POST /worker/job/:id/verify-end` (→
+    `completed`, push `job_completed`), `POST /worker/job/:id/cancel`.
+    `notifyHirer(hirerProfileId, …)` helper (push-only).
+  - **Job lists:** `GET /worker/jobs?filter=active|completed|cancelled` +
+    `GET /hirer/jobs?filter=…` → `jobsListView` rows (profession + counterpart name +
+    date + status; role-specific status buckets, newest first).
+  - **Notifications:** job events use `pushUser` (push-only, no persistent row);
+    account notices (verification decisions) keep `notifyUser` (push + in-app row).
 
 ## src/routes/portal.ts
 - `portalRouter` (mounted `/api/portal`, all routes behind `requireAdmin`):
@@ -214,8 +239,17 @@ apps/backend/
 
 ## src/lib/notifications.ts
 - `createNotification(userId, input)` — persist one in-app `notifications` row.
-- `notifyUser(userId, input)` — create the row **and** push to the user's registered
-  `push_tokens` (via `sendExpoPush`). Email is sent separately by the caller.
+- `pushUser(userId, input)` — **push only** (no row), for transient job events shown by
+  live screens + the job lists (keeps the notifications list uncluttered).
+- `notifyUser(userId, input)` — create the row **and** `pushUser`. For account notices
+  (verification decisions) that belong in the persistent list. Email is sent separately.
+
+## src/lib/matching.ts
+- `findEligibleWorkers(professionId, lat, lng, radiusKm)` — Haversine SQL selecting
+  **approved + online** workers who hold the profession, have a location, aren't off
+  today (`worker_days_off`), and are within radius; nearest first.
+- `haversineKm(aLat,aLng,bLat,bLng)` — JS great-circle distance (offer distances).
+- `DEFAULT_RADIUS_KM` — the fixed 15 km search radius (MVP).
 
 ## src/db/schema.ts
 - Re-exports all `auth-schema` tables.
@@ -253,6 +287,17 @@ apps/backend/
   `worker_profile_id` FK cascade, nullable `profession_id` FK cascade — null ⇒ all
   professions, `date` `YYYY-MM-DD`, `created_at`); index on `(worker_profile_id,
   date)`. Default (no row) = available.
+- `worker_profiles.is_online` / `last_online_at` — Uber-style presence; only online
+  workers receive job offers (migration `0008_*`).
+- `jobStatus` / `offerStatus` — pgEnums. `jobs` — a hirer's search (`hirer_profile_id`
+  + `profession_id` FKs cascade, `lat`/`lng`, `radius_km`, `status`,
+  `matched_worker_profile_id` FK→worker set-null, `expires_at`; index on `status`).
+  `job_offers` — one offer per (job, worker) (`job_id`/`worker_profile_id` FKs cascade,
+  `status`, `responded_at`; unique `(job_id, worker_profile_id)`, index on
+  `(worker_profile_id, status)`). Migration `0008_*`. Migration `0009_*` extends
+  `jobStatus` with `in_progress`/`completed` and adds `jobs.start_otp`/`end_otp`/
+  `started_at`/`completed_at`/`cancelled_by` (the OTP handshake lifecycle); migration
+  `0010_*` adds `jobs.start_requested_at` (the worker's "Start work" gate).
 - `hirer_profiles` — one per user: names, `photo_url`, city/state/lat/lng,
   `hirer_type`, `org_name`, `org_type`, `gst_registered`, `gstin`, `status`,
   `current_step`, `submitted_at`, the same `rejection_reason`/`reviewed_at`/

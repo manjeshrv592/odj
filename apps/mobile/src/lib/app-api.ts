@@ -11,6 +11,12 @@ import type {
   DayOff,
   ToggleDayOff,
   PreciseLocation,
+  JobView,
+  WorkerOffer,
+  CreateJob,
+  WorkerJobView,
+  JobListItem,
+  JobListFilter,
 } from "@odj/shared";
 import { API_URL } from "./api";
 import { authClient } from "./auth-client";
@@ -70,6 +76,9 @@ export const NOTIFICATIONS_KEY = ["notifications"] as const;
 /** TanStack Query keys for the approved-worker screens. */
 export const WORKER_RATES_KEY = ["worker", "rates"] as const;
 export const WORKER_DAYS_OFF_KEY = ["worker", "days-off"] as const;
+export const WORKER_OFFERS_KEY = ["worker", "offers"] as const;
+export const WORKER_JOB_KEY = ["worker", "job"] as const;
+export const JOB_KEY = (id: string) => ["job", id] as const;
 
 /** Typed endpoint functions for the onboarding flow. */
 export const appApi = {
@@ -135,6 +144,12 @@ export const appApi = {
   markAllNotificationsRead: () =>
     authedFetch<void>("/api/app/notifications/read-all", { method: "POST" }),
 
+  registerPushToken: (token: string, platform?: "ios" | "android" | "web") =>
+    authedFetch<void>("/api/app/push-tokens", {
+      method: "POST",
+      body: JSON.stringify({ token, platform }),
+    }),
+
   // ── Approved-worker: rates, availability, location ──────────────────────────
   workerRates: () =>
     authedFetch<{ rates: WorkerRateRow[] }>("/api/app/worker/rates").then(
@@ -171,4 +186,74 @@ export const appApi = {
 
   completeSetup: () =>
     authedFetch<void>("/api/app/worker/setup/complete", { method: "POST" }),
+
+  // ── Matching: worker presence + offers ──────────────────────────────────────
+  setOnline: (online: boolean) =>
+    authedFetch<{ online: boolean }>("/api/app/worker/online", {
+      method: "POST",
+      body: JSON.stringify({ online }),
+    }),
+
+  workerOffers: () =>
+    authedFetch<{ offers: WorkerOffer[] }>("/api/app/worker/offers").then(
+      (r) => r.offers,
+    ),
+
+  acceptOffer: (offerId: string) =>
+    authedFetch<{ ok: boolean }>(`/api/app/worker/offers/${offerId}/accept`, {
+      method: "POST",
+    }),
+
+  declineOffer: (offerId: string) =>
+    authedFetch<void>(`/api/app/worker/offers/${offerId}/decline`, {
+      method: "POST",
+    }),
+
+  // ── Matching: hirer jobs ────────────────────────────────────────────────────
+  createJob: (input: CreateJob) =>
+    authedFetch<JobView>("/api/app/jobs", {
+      method: "POST",
+      body: JSON.stringify(input),
+    }),
+
+  job: (jobId: string) => authedFetch<JobView>(`/api/app/jobs/${jobId}`),
+
+  cancelJob: (jobId: string) =>
+    authedFetch<void>(`/api/app/jobs/${jobId}/cancel`, { method: "POST" }),
+
+  // ── Job lifecycle (worker side) ─────────────────────────────────────────────
+  workerJob: () =>
+    authedFetch<{ job: WorkerJobView | null }>("/api/app/worker/job").then(
+      (r) => r.job,
+    ),
+
+  verifyStart: (jobId: string, code: string) =>
+    authedFetch<{ status: string }>(`/api/app/worker/job/${jobId}/verify-start`, {
+      method: "POST",
+      body: JSON.stringify({ code }),
+    }),
+
+  verifyEnd: (jobId: string, code: string) =>
+    authedFetch<{ status: string }>(`/api/app/worker/job/${jobId}/verify-end`, {
+      method: "POST",
+      body: JSON.stringify({ code }),
+    }),
+
+  cancelWorkerJob: (jobId: string) =>
+    authedFetch<void>(`/api/app/worker/job/${jobId}/cancel`, { method: "POST" }),
+
+  requestStart: (jobId: string) =>
+    authedFetch<void>(`/api/app/worker/job/${jobId}/request-start`, {
+      method: "POST",
+    }),
+
+  workerJobs: (filter: JobListFilter) =>
+    authedFetch<{ jobs: JobListItem[] }>(
+      `/api/app/worker/jobs?filter=${filter}`,
+    ).then((r) => r.jobs),
+
+  hirerJobs: (filter: JobListFilter) =>
+    authedFetch<{ jobs: JobListItem[] }>(
+      `/api/app/hirer/jobs?filter=${filter}`,
+    ).then((r) => r.jobs),
 };
