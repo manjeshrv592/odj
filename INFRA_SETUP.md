@@ -141,25 +141,26 @@ and POST it to the existing `/api/app/push-tokens`.)
 
 ---
 
-## Step 5 — Google Maps
+## Step 5 — Maps: MapLibre + OpenFreeMap (no Google, no billing)
 
-- [ ] Create a project at **https://console.cloud.google.com**.
-- [ ] **Enable billing** on it (add a card — usage for our volume stays within the
-      free credit, but billing must be *on* or the map renders blank).
-- [ ] **Enable these APIs** (APIs & Services → Library):
-  - **Maps SDK for Android**
-  - **Maps SDK for iOS** *(only if doing iOS)*
-- [ ] **Create API keys** (APIs & Services → Credentials → Create credentials → API
-      key). Recommended: one key per platform, each **restricted**:
-  - Android key → restrict to **Android apps** using your **package name** +
-    the **SHA-1** from Step 3.
-  - iOS key → restrict to **iOS apps** using your **bundle identifier**.
-- [ ] The keys go in `apps/mobile/app.json`
-      (`android.config.googleMaps.apiKey` / `ios.config.googleMapsApiKey`). Keep them
-      out of git — I'll wire them via `apps/mobile/.env` + app config. *(I'll handle
-      the wiring; you just provide the keys.)*
+We **dropped Google Maps** — the billing activation was a headache and we only need
+to show **points (workers) on a map**, not live turn-by-turn tracking. Instead we use
+**MapLibre** (free, open-source native map renderer) with **OpenFreeMap** tiles —
+**no API key, no billing, no signup, no Google Cloud**.
 
-➡️ **Hand back:** the **Android Maps API key** (+ **iOS key** if applicable).
+- [x] `@maplibre/maplibre-react-native` added + its Expo config plugin wired into
+      `app.json` (done in-app).
+- [x] Basemap: OpenFreeMap style URL (`https://tiles.openfreemap.org/styles/liberty`)
+      — key-less. (For production, swap to a paid/self-hosted tile source later; the
+      app code barely changes.)
+- [ ] **Rebuild** so the native MapLibre module is bundled (it's a native change):
+      ```bash
+      npx expo prebuild --clean
+      npx expo run:android
+      ```
+
+➡️ **Nothing to hand back** — there's no key. Google Cloud is off the critical path
+(chase their support whenever, or never).
 
 ---
 
