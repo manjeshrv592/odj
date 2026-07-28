@@ -130,6 +130,15 @@ packages/shared/
     `toggleDayOffSchema` / `ToggleDayOff` — `{ date, scope, off }`.
   - `preciseLocationSchema` / `PreciseLocation` — `{ lat, lng, accuracy? }`
     (`POST /worker/location`; `capturedAt` set server-side).
+- **Hiring / matching (jobs + offers):**
+  - `setOnlineSchema` `{ online }`; `WorkerProfile` also carries `isOnline`.
+  - `jobStatusSchema` (`searching|matched|cancelled|expired|no_workers`),
+    `offerStatusSchema` (`pending|accepted|declined|cancelled|expired`).
+  - `createJobSchema` `{ professionId, lat, lng }`; `jobViewSchema` / `JobView`
+    (`{ id, status, professionId, matchedWorker?: { name, lat, lng } }`, hirer poll).
+  - `workerOfferSchema` / `WorkerOffer` (`{ offerId, jobId, professionName, distanceKm,
+    createdAt }`) + `workerOffersViewSchema`.
+  - `notificationTypeSchema` extended with `job_offer` / `job_matched` / `job_cancelled`.
 
 > Grows as features land. Prefer generating DB-owned shapes via `drizzle-zod`
 > (in backend) and re-exporting refined schemas here.

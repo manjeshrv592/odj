@@ -198,6 +198,9 @@ export const workerProfiles = pgTable("worker_profiles", {
   // finish or skip the dashboard setup flow (drives routing to the worker home).
   availabilityReviewedAt: timestamp("availability_reviewed_at"),
   setupCompletedAt: timestamp("setup_completed_at"),
+  // Uber-style presence: a worker only receives job offers while `is_online`.
+  isOnline: boolean("is_online").notNull().default(false),
+  lastOnlineAt: timestamp("last_online_at"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
@@ -348,4 +351,81 @@ export const notifications = pgTable(
     createdAt: timestamp("created_at").notNull().defaultNow(),
   },
   (t) => [index("notifications_user_idx").on(t.userId)],
+);
+
+// ── Hiring / matching (jobs + offers) ────────────────────────────────────────
+/**
+ * A hirer's search for a worker: `searching` while offers are out, `matched` once
+ * a worker accepts (first-accept-wins), `cancelled` if the hirer stops, `expired`
+ * if no one accepts in time, `no_workers` if none were eligible at search time.
+ */
+export const jobStatus = pgEnum("job_status", [
+  "searching",
+  "matched",
+  "cancelled",
+  "expired",
+  "no_workers",
+]);
+
+/** Lifecycle of a single job offer sent to one worker. */
+export const offerStatus = pgEnum("offer_status", [
+  "pending",
+  "accepted",
+  "declined",
+  "cancelled",
+  "expired",
+]);
+
+/**
+ * A hiring search created by a hirer for one profession, centered on the hirer's
+ * `lat`/`lng` with a `radius_km`. `matched_worker_profile_id` is the winner once a
+ * worker accepts. `expires_at` bounds how long the search stays open.
+ */
+export const jobs = pgTable(
+  "jobs",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    hirerProfileId: uuid("hirer_profile_id")
+      .notNull()
+      .references(() => hirerProfiles.id, { onDelete: "cascade" }),
+    professionId: uuid("profession_id")
+      .notNull()
+      .references(() => professions.id, { onDelete: "cascade" }),
+    lat: doublePrecision("lat").notNull(),
+    lng: doublePrecision("lng").notNull(),
+    radiusKm: integer("radius_km").notNull(),
+    status: jobStatus("status").notNull().default("searching"),
+    matchedWorkerProfileId: uuid("matched_worker_profile_id").references(
+      () => workerProfiles.id,
+      { onDelete: "set null" },
+    ),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+    expiresAt: timestamp("expires_at").notNull(),
+    updatedAt: timestamp("updated_at").notNull().defaultNow(),
+  },
+  (t) => [index("jobs_status_idx").on(t.status)],
+);
+
+/**
+ * A job broadcast to one candidate worker. Exactly one offer per (job, worker).
+ * On the winning accept, that offer → `accepted` and the rest → `cancelled`.
+ */
+export const jobOffers = pgTable(
+  "job_offers",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    jobId: uuid("job_id")
+      .notNull()
+      .references(() => jobs.id, { onDelete: "cascade" }),
+    workerProfileId: uuid("worker_profile_id")
+      .notNull()
+      .references(() => workerProfiles.id, { onDelete: "cascade" }),
+    status: offerStatus("status").notNull().default("pending"),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+    respondedAt: timestamp("responded_at"),
+  },
+  (t) => [
+    uniqueIndex("job_offers_job_worker_uniq").on(t.jobId, t.workerProfileId),
+    index("job_offers_worker_status_idx").on(t.workerProfileId, t.status),
+  ],
 );

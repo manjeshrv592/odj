@@ -133,6 +133,15 @@ apps/backend/
     projects these three timestamps for the dashboard checkmarks + home routing.
     Helper `workerProfessionRows(workerProfileId)` joins the worker's professions
     with their admin price bounds.
+  - **Matching (hiring flow):** `requireApprovedHirer` guard + `loadJobView(jobId)`
+    projection. **Worker:** `POST /worker/online` (`is_online` presence),
+    `GET /worker/offers` (pending offers on still-open jobs + Haversine distance),
+    `POST /worker/offers/:id/accept` (**race-safe first-accept-wins**: a tx flips the
+    job out of `searching` via a conditional UPDATE, accepts this offer, cancels the
+    rest, pushes `job_matched` to the hirer), `POST /worker/offers/:id/decline`.
+    **Hirer:** `POST /jobs` (find eligible workers via `lib/matching`, create job +
+    offers, push `job_offer` to each), `GET /jobs/:id` (poll; lazy-expires stale
+    searches; includes `matchedWorker` when matched), `POST /jobs/:id/cancel`.
 
 ## src/routes/portal.ts
 - `portalRouter` (mounted `/api/portal`, all routes behind `requireAdmin`):
@@ -217,6 +226,13 @@ apps/backend/
 - `notifyUser(userId, input)` — create the row **and** push to the user's registered
   `push_tokens` (via `sendExpoPush`). Email is sent separately by the caller.
 
+## src/lib/matching.ts
+- `findEligibleWorkers(professionId, lat, lng, radiusKm)` — Haversine SQL selecting
+  **approved + online** workers who hold the profession, have a location, aren't off
+  today (`worker_days_off`), and are within radius; nearest first.
+- `haversineKm(aLat,aLng,bLat,bLng)` — JS great-circle distance (offer distances).
+- `DEFAULT_RADIUS_KM` — the fixed 15 km search radius (MVP).
+
 ## src/db/schema.ts
 - Re-exports all `auth-schema` tables.
 - `categories` — a working domain/category (id, name, slug unique, description,
@@ -253,6 +269,14 @@ apps/backend/
   `worker_profile_id` FK cascade, nullable `profession_id` FK cascade — null ⇒ all
   professions, `date` `YYYY-MM-DD`, `created_at`); index on `(worker_profile_id,
   date)`. Default (no row) = available.
+- `worker_profiles.is_online` / `last_online_at` — Uber-style presence; only online
+  workers receive job offers (migration `0008_*`).
+- `jobStatus` / `offerStatus` — pgEnums. `jobs` — a hirer's search (`hirer_profile_id`
+  + `profession_id` FKs cascade, `lat`/`lng`, `radius_km`, `status`,
+  `matched_worker_profile_id` FK→worker set-null, `expires_at`; index on `status`).
+  `job_offers` — one offer per (job, worker) (`job_id`/`worker_profile_id` FKs cascade,
+  `status`, `responded_at`; unique `(job_id, worker_profile_id)`, index on
+  `(worker_profile_id, status)`). Migration `0008_*`.
 - `hirer_profiles` — one per user: names, `photo_url`, city/state/lat/lng,
   `hirer_type`, `org_name`, `org_type`, `gst_registered`, `gstin`, `status`,
   `current_step`, `submitted_at`, the same `rejection_reason`/`reviewed_at`/

@@ -82,10 +82,14 @@ sub-items as scope is refined. `[x]` done · `[~]` in progress · `[ ]` not star
 
 ### Hirer → worker matching
 
-- [ ] Search workers by category / filters
+- [x] Search workers by category / profession — hirer browses Categories →
+  Professions → starts a search (mobile `(hirer)` flow).
+- [x] Hire a worker (Uber-style) — hirer picks a profession → MapLibre "searching…"
+  map; backend Haversine radius (15 km) search over **online** workers respecting the
+  day-off calendar; push `job_offer` to each; **race-safe first-accept-wins**; hirer
+  sees the matched worker's name + pin. Worker "Go online" toggle + incoming-offer
+  Accept/Decline. Real-time = push + ~2s polling.
 - [ ] Worker profile view (with ratings)
-- [ ] Hire a worker (Uber-style map + radius search + first-accept-wins offer —
-  Phase 4: needs maps API key + dev build + real-time layer)
 - [ ] Start-of-job OTP verification
 - [ ] End-of-job OTP verification
 

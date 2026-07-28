@@ -1,6 +1,6 @@
 import { View, ScrollView } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { useRouter } from "expo-router";
+import { useRouter, type Href } from "expo-router";
 import { useQueryClient } from "@tanstack/react-query";
 import { signOut } from "@/lib/auth-client";
 import { ONBOARDING_STATE_KEY, NOTIFICATIONS_KEY } from "@/lib/app-api";
@@ -11,15 +11,16 @@ import { Text } from "@/components/ui/text";
 import { Button } from "@/components/ui/button";
 
 /**
- * Home for an approved worker/hirer. A verified **worker** can Continue into the
- * worker dashboard (set rates, availability, location). A verified **hirer**
- * stays on the "more coming soon" stub (the hirer hiring flow is Phase 4).
+ * Home for an approved worker/hirer. A verified **worker** continues into the
+ * worker dashboard (rates/availability/location); a verified **hirer** can start
+ * searching for a worker.
  */
 export default function HomeScreen() {
   const router = useRouter();
   const qc = useQueryClient();
   const { data: state } = useOnboardingState();
   const isWorker = state?.userType === "worker";
+  const isHirer = state?.userType === "hirer";
 
   async function handleSignOut() {
     await signOut();
@@ -39,13 +40,19 @@ export default function HomeScreen() {
           <Text className="text-center text-muted-foreground">
             {isWorker
               ? "Your ODJ profile is approved. Set up your rates and availability to start getting hired."
-              : "Your ODJ profile is approved. More is coming soon."}
+              : "Your ODJ profile is approved. Find a worker whenever you need one."}
           </Text>
         </View>
 
         {isWorker ? (
           <Button onPress={() => router.push("/dashboard")}>
             <Text>Continue</Text>
+          </Button>
+        ) : null}
+
+        {isHirer ? (
+          <Button onPress={() => router.push("/(hirer)" as Href)}>
+            <Text>Find a worker</Text>
           </Button>
         ) : null}
 

@@ -31,7 +31,12 @@ apps/mobile/
     ├── global.css         # @tailwind + shadcn/rnr theme tokens (:root/.dark)
     ├── app/
     │   ├── _layout.tsx    # root Stack + <SessionGate> (auth/onboarding routing)
-    │   ├── index.tsx      # approved home — "you're verified"; worker gets Continue → (worker)
+    │   ├── index.tsx      # approved home — worker → Continue; hirer → "Find a worker" → (hirer)
+    │   ├── (hirer)/       # approved-hirer hiring flow (browse → search → match)
+    │   │   ├── _layout.tsx     # Stack (headers hidden)
+    │   │   ├── index.tsx       # pick a category
+    │   │   ├── professions.tsx # pick a profession → POST /jobs → search
+    │   │   └── search.tsx      # live "searching…" map that flips to the matched worker
     │   ├── (worker)/      # approved-worker area (rates / availability / location)
     │   │   ├── _layout.tsx     # Stack (headers hidden)
     │   │   ├── dashboard.tsx   # setup hub: rates/availability/location + ✓ + Finish/Skip
@@ -64,7 +69,8 @@ apps/mobile/
         ├── api.ts         # API_URL + apiFetch() (public endpoints)
         ├── app-api.ts     # authed /api/app client (attaches session cookie) + appApi
         ├── use-onboarding.ts # useOnboardingState() query (GET /api/app/me)
-        ├── use-worker.ts  # useWorkerRates() + useWorkerDaysOff() (approved-worker queries)
+        ├── use-worker.ts  # useWorkerRates()/useWorkerDaysOff()/useWorkerOffers() (worker queries)
+        ├── use-hirer.ts   # useJob() — polls a hiring job while searching
         ├── use-notifications.ts # useNotifications() query (GET /api/app/notifications)
         ├── uploadcare.ts  # uploadToUploadcare() — expo-image-picker → Uploadcare CDN
         ├── storage.ts     # cross-platform storage (SecureStore native / localStorage web)
@@ -106,9 +112,21 @@ apps/mobile/
   (`worker.locationCapturedAt`). Bottom button `appApi.completeSetup` →
   `router.replace("/home")`; labelled "Finish" once rates+location are done, else
   "Skip for now" (availability is optional).
-- `home.tsx` — `WorkerHome`: where a set-up worker lands ("you're all set" +
-  `<NotificationsList>` + `<ThemeToggle>` + sign out + "Manage rates & availability"
-  → dashboard). Placeholder for the Phase-4 job inbox.
+- `home.tsx` — `WorkerHome`: where a set-up worker lands. A **"Go online"** `Switch`
+  (`appApi.setOnline`, seeded from `worker.isOnline`); while online, an "Incoming
+  requests" section polls `useWorkerOffers` (3s) and renders offer cards with
+  Accept/Decline (`appApi.acceptOffer`/`declineOffer`; 409 → "already taken"). Plus
+  `<NotificationsList>`, "Manage rates & availability" → dashboard, theme, sign out.
+
+## src/app/(hirer)/
+- `_layout.tsx` — Stack, headers hidden.
+- `index.tsx` — `HirerBrowse`: active categories (reuse `appApi.categories`) → tap →
+  professions.
+- `professions.tsx` — `HirerProfessions` (`?categoryId`): professions in the category;
+  tapping one `appApi.createJob({ professionId, hirer lat/lng })` → search.
+- `search.tsx` — `HirerSearch` (`?jobId`): `<Map>` centered on the hirer with a
+  "searching…" overlay; `useJob` polls every 2s; flips to the matched worker's name +
+  pin, or "no workers"/"expired"; Cancel → `appApi.cancelJob`.
 - `rates.tsx` — `WorkerRatesScreen`: `useWorkerRates()`; per profession renders only
   admin-enabled units (₹ daily/hourly) as a `@react-native-community/slider` bounded
   to [min,max] synced with a number `Input` + client validation; Save →
@@ -209,7 +227,9 @@ apps/mobile/
   `saveWorkerProfessions`, `submitWorker`, `saveHirer`, `submitHirer`, plus
   notifications: `notifications`, `markNotificationRead`, `markAllNotificationsRead`,
   and the approved-worker calls: `workerRates`, `saveWorkerRates`, `workerDaysOff`,
-  `toggleDayOff`, `saveWorkerLocation`, `markAvailabilityReviewed`, `completeSetup`.
+  `toggleDayOff`, `saveWorkerLocation`, `markAvailabilityReviewed`, `completeSetup`,
+  and the matching calls: `setOnline`, `workerOffers`, `acceptOffer`, `declineOffer`,
+  `createJob`, `job`, `cancelJob` (+ `WORKER_OFFERS_KEY` / `JOB_KEY`).
 - `ONBOARDING_STATE_KEY` / `NOTIFICATIONS_KEY` / `WORKER_RATES_KEY` /
   `WORKER_DAYS_OFF_KEY` — TanStack Query keys.
 
