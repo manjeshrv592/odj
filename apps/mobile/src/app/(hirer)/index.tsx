@@ -7,7 +7,7 @@ import { useSession } from "@/lib/auth-client";
 import { Text } from "@/components/ui/text";
 import { Button } from "@/components/ui/button";
 
-/** Hirer step 1 — pick a category of work. */
+/** Hirer Home tab — resume any active job, else pick a category to search. */
 export default function HirerBrowse() {
   const router = useRouter();
   const { data: session } = useSession();
@@ -16,6 +16,13 @@ export default function HirerBrowse() {
     queryFn: appApi.categories,
     enabled: !!session?.user,
   });
+  const { data: activeJobs } = useQuery({
+    queryKey: ["hirer", "jobs", "active"],
+    queryFn: () => appApi.hirerJobs("active"),
+    enabled: !!session?.user,
+    refetchInterval: 5000,
+  });
+  const active = activeJobs?.[0];
 
   return (
     <SafeAreaView className="flex-1 bg-background">
@@ -28,6 +35,27 @@ export default function HirerBrowse() {
             Pick a category, then the exact profession to search for.
           </Text>
         </View>
+
+        {active ? (
+          <Button
+            variant="outline"
+            className="h-auto items-center justify-start gap-3 border-primary p-4"
+            onPress={() =>
+              router.push(`/(hirer)/search?jobId=${active.id}` as Href)
+            }
+          >
+            <Text className="text-2xl">🧰</Text>
+            <View className="flex-1">
+              <Text className="font-poppins-medium text-foreground">
+                Active — {active.professionName}
+              </Text>
+              <Text className="text-sm text-muted-foreground">
+                Tap to resume this search / job
+              </Text>
+            </View>
+            <Text className="text-2xl text-muted-foreground">›</Text>
+          </Button>
+        ) : null}
 
         {isLoading ? (
           <ActivityIndicator className="mt-8" />
@@ -57,11 +85,6 @@ export default function HirerBrowse() {
           </View>
         )}
       </ScrollView>
-      <View className="p-6">
-        <Button variant="ghost" onPress={() => router.back()}>
-          <Text className="text-muted-foreground">← Back</Text>
-        </Button>
-      </View>
     </SafeAreaView>
   );
 }

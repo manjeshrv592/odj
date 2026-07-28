@@ -1,0 +1,1 @@
+ALTER TABLE "jobs" ADD COLUMN "start_requested_at" timestamp;

@@ -4,6 +4,7 @@ import {
   WORKER_RATES_KEY,
   WORKER_DAYS_OFF_KEY,
   WORKER_OFFERS_KEY,
+  WORKER_JOB_KEY,
 } from "./app-api";
 import { useSession } from "./auth-client";
 
@@ -41,5 +42,19 @@ export function useWorkerOffers(enabled: boolean) {
     queryFn: appApi.workerOffers,
     enabled: !!session?.user && enabled,
     refetchInterval: enabled ? 3000 : false,
+  });
+}
+
+/**
+ * The worker's current active job (matched/in_progress), or null. Polled every 3s
+ * so status flips (started/completed/cancelled by the other side) show quickly.
+ */
+export function useWorkerJob() {
+  const { data: session } = useSession();
+  return useQuery({
+    queryKey: WORKER_JOB_KEY,
+    queryFn: appApi.workerJob,
+    enabled: !!session?.user,
+    refetchInterval: 3000,
   });
 }

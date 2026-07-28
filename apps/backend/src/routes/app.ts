@@ -15,6 +15,7 @@ import {
   isoDateSchema,
   setOnlineSchema,
   createJobSchema,
+  verifyOtpSchema,
   type Category,
   type Profession,
   type WorkerProfile,
@@ -23,8 +24,11 @@ import {
   type Notification,
   type WorkerRateRow,
   type DayOff,
+  jobListFilterSchema,
   type JobView,
   type WorkerOffer,
+  type WorkerJobView,
+  type JobListItem,
 } from "@odj/shared";
 import { db } from "../db";
 import {
@@ -43,7 +47,7 @@ import {
 } from "../db/schema";
 import { requireUser } from "../middleware/require-user";
 import { effectiveFieldsForProfessions } from "../lib/requirements";
-import { notifyUser } from "../lib/notifications";
+import { pushUser } from "../lib/notifications";
 import {
   findEligibleWorkers,
   haversineKm,
@@ -733,13 +737,18 @@ async function requireApprovedHirer(
   return row;
 }
 
-/** Project a job row to the hirer-facing view (+ matched worker when matched). */
+/** A random 4-digit OTP string (physical start/end handshake). */
+function make4DigitOtp(): string {
+  return String(Math.floor(1000 + Math.random() * 9000));
+}
+
+/** Project a job row to the hirer-facing view (matched worker + OTP to show). */
 async function loadJobView(jobId: string): Promise<JobView | null> {
   const [job] = await db.select().from(jobs).where(eq(jobs.id, jobId)).limit(1);
   if (!job) return null;
 
   let matchedWorker: JobView["matchedWorker"] = null;
-  if (job.status === "matched" && job.matchedWorkerProfileId) {
+  if (job.matchedWorkerProfileId) {
     const [w] = await db
       .select({
         firstName: workerProfiles.firstName,
@@ -758,11 +767,24 @@ async function loadJobView(jobId: string): Promise<JobView | null> {
       };
     }
   }
+
+  // Hirer shows the start code once the worker taps "Start work" (while matched),
+  // the end code while in progress.
+  const otpToShow =
+    job.status === "matched"
+      ? job.startRequestedAt
+        ? job.startOtp
+        : null
+      : job.status === "in_progress"
+        ? job.endOtp
+        : null;
+
   return {
     id: job.id,
     status: job.status,
     professionId: job.professionId,
     matchedWorker,
+    otpToShow,
   };
 }
 
@@ -861,6 +883,9 @@ appRouter.post(
         .set({
           status: "matched",
           matchedWorkerProfileId: profile.id,
+          // Generate the start/end handshake codes at match time.
+          startOtp: make4DigitOtp(),
+          endOtp: make4DigitOtp(),
           updatedAt: new Date(),
         })
         .where(and(eq(jobs.id, offer.jobId), eq(jobs.status, "searching")))
@@ -898,7 +923,7 @@ appRouter.post(
       const name =
         [profile.firstName, profile.lastName].filter(Boolean).join(" ") ||
         "A worker";
-      await notifyUser(hirer.userId, {
+      await pushUser(hirer.userId, {
         type: "job_matched",
         title: "Worker found!",
         body: `${name} accepted your request.`,
@@ -984,7 +1009,7 @@ appRouter.post("/jobs", async (req: Request, res: Response) => {
       const offer = offerRows.find(
         (o) => o.workerProfileId === w.workerProfileId,
       );
-      await notifyUser(w.userId, {
+      await pushUser(w.userId, {
         type: "job_offer",
         title: "New job request",
         body: `A hirer nearby needs a ${profession.name}. Tap to respond.`,
@@ -1029,7 +1054,7 @@ appRouter.get("/jobs/:id", async (req: Request, res: Response) => {
   res.json(await loadJobView(job.id));
 });
 
-// POST /api/app/jobs/:id/cancel — hirer stops an in-progress search.
+// POST /api/app/jobs/:id/cancel — hirer cancels (while searching/matched/in_progress).
 appRouter.post("/jobs/:id/cancel", async (req: Request, res: Response) => {
   const u = req.appUser!;
   const hirer = await requireApprovedHirer(u.id, res);
@@ -1037,22 +1062,340 @@ appRouter.post("/jobs/:id/cancel", async (req: Request, res: Response) => {
 
   const [job] = await db
     .update(jobs)
-    .set({ status: "cancelled", updatedAt: new Date() })
+    .set({ status: "cancelled", cancelledBy: "hirer", updatedAt: new Date() })
     .where(
       and(
         eq(jobs.id, String(req.params.id)),
         eq(jobs.hirerProfileId, hirer.id),
-        eq(jobs.status, "searching"),
+        inArray(jobs.status, ["searching", "matched", "in_progress"]),
       ),
     )
-    .returning({ id: jobs.id });
+    .returning();
   if (job) {
     await db
       .update(jobOffers)
       .set({ status: "cancelled" })
       .where(and(eq(jobOffers.jobId, job.id), eq(jobOffers.status, "pending")));
+    if (job.matchedWorkerProfileId) {
+      const [w] = await db
+        .select({ userId: workerProfiles.userId })
+        .from(workerProfiles)
+        .where(eq(workerProfiles.id, job.matchedWorkerProfileId))
+        .limit(1);
+      if (w) {
+        await pushUser(w.userId, {
+          type: "job_cancelled",
+          title: "Job cancelled",
+          body: "The hirer cancelled the job.",
+          data: { jobId: job.id },
+        });
+      }
+    }
   }
   res.status(204).end();
+});
+
+// ── Worker active job (post-match lifecycle) ──────────────────────────────────
+
+/** Push a job event to the hirer (push-only — job events don't persist as rows). */
+async function notifyHirer(
+  hirerProfileId: string,
+  input: Parameters<typeof pushUser>[1],
+): Promise<void> {
+  const [h] = await db
+    .select({ userId: hirerProfiles.userId })
+    .from(hirerProfiles)
+    .where(eq(hirerProfiles.id, hirerProfileId))
+    .limit(1);
+  if (h) await pushUser(h.userId, input);
+}
+
+// GET /api/app/worker/job — the worker's current active job (matched/in_progress).
+appRouter.get("/worker/job", async (req: Request, res: Response) => {
+  const u = req.appUser!;
+  const profile = await requireApprovedWorker(u.id, res);
+  if (!profile) return;
+
+  const [row] = await db
+    .select({
+      id: jobs.id,
+      status: jobs.status,
+      professionName: professions.name,
+      hirerFirst: hirerProfiles.firstName,
+      hirerLast: hirerProfiles.lastName,
+      hirerLat: jobs.lat,
+      hirerLng: jobs.lng,
+      startRequestedAt: jobs.startRequestedAt,
+    })
+    .from(jobs)
+    .innerJoin(professions, eq(jobs.professionId, professions.id))
+    .innerJoin(hirerProfiles, eq(jobs.hirerProfileId, hirerProfiles.id))
+    .where(
+      and(
+        eq(jobs.matchedWorkerProfileId, profile.id),
+        inArray(jobs.status, ["matched", "in_progress"]),
+      ),
+    )
+    .orderBy(desc(jobs.updatedAt))
+    .limit(1);
+
+  if (!row) {
+    res.json({ job: null });
+    return;
+  }
+  const view: WorkerJobView = {
+    id: row.id,
+    status: row.status,
+    professionName: row.professionName,
+    hirer: {
+      name: [row.hirerFirst, row.hirerLast].filter(Boolean).join(" ") || "Hirer",
+      lat: row.hirerLat,
+      lng: row.hirerLng,
+    },
+    startRequested: row.startRequestedAt != null,
+  };
+  res.json({ job: view });
+});
+
+// POST /api/app/worker/job/:id/request-start — worker taps "Start work" (reveals
+// the start OTP to the hirer). Idempotent; only while `matched`.
+appRouter.post(
+  "/worker/job/:id/request-start",
+  async (req: Request, res: Response) => {
+    const u = req.appUser!;
+    const profile = await requireApprovedWorker(u.id, res);
+    if (!profile) return;
+    const [job] = await db
+      .update(jobs)
+      .set({ startRequestedAt: new Date(), updatedAt: new Date() })
+      .where(
+        and(
+          eq(jobs.id, String(req.params.id)),
+          eq(jobs.matchedWorkerProfileId, profile.id),
+          eq(jobs.status, "matched"),
+        ),
+      )
+      .returning({ id: jobs.id });
+    if (!job) {
+      res.status(409).json({ error: "Job is not awaiting start" });
+      return;
+    }
+    res.status(204).end();
+  },
+);
+
+// POST /api/app/worker/job/:id/verify-start — worker enters the hirer's start code.
+appRouter.post(
+  "/worker/job/:id/verify-start",
+  async (req: Request, res: Response) => {
+    const parsed = verifyOtpSchema.safeParse(req.body);
+    if (!parsed.success) return invalid(res, parsed.error);
+    const u = req.appUser!;
+    const profile = await requireApprovedWorker(u.id, res);
+    if (!profile) return;
+
+    const [job] = await db
+      .select()
+      .from(jobs)
+      .where(
+        and(
+          eq(jobs.id, String(req.params.id)),
+          eq(jobs.matchedWorkerProfileId, profile.id),
+        ),
+      )
+      .limit(1);
+    if (!job) {
+      res.status(404).json({ error: "Job not found" });
+      return;
+    }
+    if (job.status !== "matched" || !job.startRequestedAt) {
+      res.status(409).json({ error: "Tap Start work first" });
+      return;
+    }
+    if (parsed.data.code !== job.startOtp) {
+      res.status(400).json({ error: "Incorrect code" });
+      return;
+    }
+    await db
+      .update(jobs)
+      .set({ status: "in_progress", startedAt: new Date(), updatedAt: new Date() })
+      .where(eq(jobs.id, job.id));
+    await notifyHirer(job.hirerProfileId, {
+      type: "job_started",
+      title: "Job started",
+      body: "Your worker verified the start code — the job is now in progress.",
+      data: { jobId: job.id },
+    });
+    res.json({ status: "in_progress" });
+  },
+);
+
+// POST /api/app/worker/job/:id/verify-end — worker enters the hirer's end code.
+appRouter.post(
+  "/worker/job/:id/verify-end",
+  async (req: Request, res: Response) => {
+    const parsed = verifyOtpSchema.safeParse(req.body);
+    if (!parsed.success) return invalid(res, parsed.error);
+    const u = req.appUser!;
+    const profile = await requireApprovedWorker(u.id, res);
+    if (!profile) return;
+
+    const [job] = await db
+      .select()
+      .from(jobs)
+      .where(
+        and(
+          eq(jobs.id, String(req.params.id)),
+          eq(jobs.matchedWorkerProfileId, profile.id),
+        ),
+      )
+      .limit(1);
+    if (!job) {
+      res.status(404).json({ error: "Job not found" });
+      return;
+    }
+    if (job.status !== "in_progress") {
+      res.status(409).json({ error: "Job is not in progress" });
+      return;
+    }
+    if (parsed.data.code !== job.endOtp) {
+      res.status(400).json({ error: "Incorrect code" });
+      return;
+    }
+    await db
+      .update(jobs)
+      .set({ status: "completed", completedAt: new Date(), updatedAt: new Date() })
+      .where(eq(jobs.id, job.id));
+    await notifyHirer(job.hirerProfileId, {
+      type: "job_completed",
+      title: "Job completed",
+      body: "Your worker verified the completion code — the job is done.",
+      data: { jobId: job.id },
+    });
+    res.json({ status: "completed" });
+  },
+);
+
+// POST /api/app/worker/job/:id/cancel — worker cancels a matched/in-progress job.
+appRouter.post(
+  "/worker/job/:id/cancel",
+  async (req: Request, res: Response) => {
+    const u = req.appUser!;
+    const profile = await requireApprovedWorker(u.id, res);
+    if (!profile) return;
+
+    const [job] = await db
+      .update(jobs)
+      .set({ status: "cancelled", cancelledBy: "worker", updatedAt: new Date() })
+      .where(
+        and(
+          eq(jobs.id, String(req.params.id)),
+          eq(jobs.matchedWorkerProfileId, profile.id),
+          inArray(jobs.status, ["matched", "in_progress"]),
+        ),
+      )
+      .returning();
+    if (job) {
+      await notifyHirer(job.hirerProfileId, {
+        type: "job_cancelled",
+        title: "Job cancelled",
+        body: "The worker cancelled the job.",
+        data: { jobId: job.id },
+      });
+    }
+    res.status(204).end();
+  },
+);
+
+// ── Job lists (history) ───────────────────────────────────────────────────────
+
+type JobStatusValue = (typeof jobs.$inferSelect)["status"];
+
+// GET /api/app/worker/jobs?filter=active|completed|cancelled
+appRouter.get("/worker/jobs", async (req: Request, res: Response) => {
+  const u = req.appUser!;
+  const profile = await requireApprovedWorker(u.id, res);
+  if (!profile) return;
+  const filter = jobListFilterSchema.catch("active").parse(req.query.filter);
+  const statuses: JobStatusValue[] =
+    filter === "active"
+      ? ["matched", "in_progress"]
+      : filter === "completed"
+        ? ["completed"]
+        : ["cancelled"];
+
+  const rows = await db
+    .select({
+      id: jobs.id,
+      status: jobs.status,
+      professionName: professions.name,
+      hirerFirst: hirerProfiles.firstName,
+      hirerLast: hirerProfiles.lastName,
+      createdAt: jobs.createdAt,
+    })
+    .from(jobs)
+    .innerJoin(professions, eq(jobs.professionId, professions.id))
+    .innerJoin(hirerProfiles, eq(jobs.hirerProfileId, hirerProfiles.id))
+    .where(
+      and(
+        eq(jobs.matchedWorkerProfileId, profile.id),
+        inArray(jobs.status, statuses),
+      ),
+    )
+    .orderBy(desc(jobs.createdAt))
+    .limit(100);
+
+  const list: JobListItem[] = rows.map((r) => ({
+    id: r.id,
+    status: r.status,
+    professionName: r.professionName,
+    counterpartName:
+      [r.hirerFirst, r.hirerLast].filter(Boolean).join(" ") || "Hirer",
+    createdAt: r.createdAt,
+  }));
+  res.json({ jobs: list });
+});
+
+// GET /api/app/hirer/jobs?filter=active|completed|cancelled
+appRouter.get("/hirer/jobs", async (req: Request, res: Response) => {
+  const u = req.appUser!;
+  const hirer = await requireApprovedHirer(u.id, res);
+  if (!hirer) return;
+  const filter = jobListFilterSchema.catch("active").parse(req.query.filter);
+  const statuses: JobStatusValue[] =
+    filter === "active"
+      ? ["searching", "matched", "in_progress"]
+      : filter === "completed"
+        ? ["completed"]
+        : ["cancelled", "expired", "no_workers"];
+
+  const rows = await db
+    .select({
+      id: jobs.id,
+      status: jobs.status,
+      professionName: professions.name,
+      workerFirst: workerProfiles.firstName,
+      workerLast: workerProfiles.lastName,
+      createdAt: jobs.createdAt,
+    })
+    .from(jobs)
+    .innerJoin(professions, eq(jobs.professionId, professions.id))
+    .leftJoin(workerProfiles, eq(jobs.matchedWorkerProfileId, workerProfiles.id))
+    .where(
+      and(eq(jobs.hirerProfileId, hirer.id), inArray(jobs.status, statuses)),
+    )
+    .orderBy(desc(jobs.createdAt))
+    .limit(100);
+
+  const list: JobListItem[] = rows.map((r) => ({
+    id: r.id,
+    status: r.status,
+    professionName: r.professionName,
+    counterpartName:
+      [r.workerFirst, r.workerLast].filter(Boolean).join(" ") || "—",
+    createdAt: r.createdAt,
+  }));
+  res.json({ jobs: list });
 });
 
 // ── Hirer draft saves ─────────────────────────────────────────────────────────

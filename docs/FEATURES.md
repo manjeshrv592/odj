@@ -77,8 +77,9 @@ sub-items as scope is refined. `[x]` done · `[~]` in progress · `[ ]` not star
   specific profession (one-off dates; default = available). (Phase 2)
 - [x] Worker precise location — one-time high-accuracy foreground capture
   (lat/lng + accuracy + capturedAt). (Phase 3)
-- [ ] Live/background location + "online now" presence toggle (Phase 4 — needs an
-  EAS dev build + `expo-task-manager`)
+- [x] "Go online" presence toggle — worker flips available-now (`is_online`); only
+  online workers receive offers. (Live/background *movement* tracking is out of scope
+  — we plot points, not real-time position; would need `expo-task-manager`.)
 
 ### Hirer → worker matching
 
@@ -89,9 +90,16 @@ sub-items as scope is refined. `[x]` done · `[~]` in progress · `[ ]` not star
   day-off calendar; push `job_offer` to each; **race-safe first-accept-wins**; hirer
   sees the matched worker's name + pin. Worker "Go online" toggle + incoming-offer
   Accept/Decline. Real-time = push + ~2s polling.
-- [ ] Worker profile view (with ratings)
-- [ ] Start-of-job OTP verification
-- [ ] End-of-job OTP verification
+- [ ] Worker profile view (with ratings) — deferred with §8 Ratings (the profile
+  view is only meaningful once ratings exist).
+- [x] Start-of-job OTP verification — post-match active-job flow: hirer shows a
+  4-digit code, worker enters it → job `in_progress` (`started_at`, notify hirer).
+- [x] End-of-job OTP verification — hirer shows the completion code, worker enters
+  it → `completed`. Either party can cancel a matched/in-progress job.
+- [x] Job history + app nav — bottom **tab bar** per role (Home / Jobs / Profile);
+  the **Jobs** tab lists Active / Completed / Cancelled. Worker accept → "on the way"
+  → **Start work** gate before the start OTP. Job events are push-only (the in-app
+  notifications list is reserved for account notices).
 
 ## 5. Payments
 

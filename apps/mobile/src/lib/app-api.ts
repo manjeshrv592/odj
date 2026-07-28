@@ -14,6 +14,9 @@ import type {
   JobView,
   WorkerOffer,
   CreateJob,
+  WorkerJobView,
+  JobListItem,
+  JobListFilter,
 } from "@odj/shared";
 import { API_URL } from "./api";
 import { authClient } from "./auth-client";
@@ -74,6 +77,7 @@ export const NOTIFICATIONS_KEY = ["notifications"] as const;
 export const WORKER_RATES_KEY = ["worker", "rates"] as const;
 export const WORKER_DAYS_OFF_KEY = ["worker", "days-off"] as const;
 export const WORKER_OFFERS_KEY = ["worker", "offers"] as const;
+export const WORKER_JOB_KEY = ["worker", "job"] as const;
 export const JOB_KEY = (id: string) => ["job", id] as const;
 
 /** Typed endpoint functions for the onboarding flow. */
@@ -216,4 +220,40 @@ export const appApi = {
 
   cancelJob: (jobId: string) =>
     authedFetch<void>(`/api/app/jobs/${jobId}/cancel`, { method: "POST" }),
+
+  // ── Job lifecycle (worker side) ─────────────────────────────────────────────
+  workerJob: () =>
+    authedFetch<{ job: WorkerJobView | null }>("/api/app/worker/job").then(
+      (r) => r.job,
+    ),
+
+  verifyStart: (jobId: string, code: string) =>
+    authedFetch<{ status: string }>(`/api/app/worker/job/${jobId}/verify-start`, {
+      method: "POST",
+      body: JSON.stringify({ code }),
+    }),
+
+  verifyEnd: (jobId: string, code: string) =>
+    authedFetch<{ status: string }>(`/api/app/worker/job/${jobId}/verify-end`, {
+      method: "POST",
+      body: JSON.stringify({ code }),
+    }),
+
+  cancelWorkerJob: (jobId: string) =>
+    authedFetch<void>(`/api/app/worker/job/${jobId}/cancel`, { method: "POST" }),
+
+  requestStart: (jobId: string) =>
+    authedFetch<void>(`/api/app/worker/job/${jobId}/request-start`, {
+      method: "POST",
+    }),
+
+  workerJobs: (filter: JobListFilter) =>
+    authedFetch<{ jobs: JobListItem[] }>(
+      `/api/app/worker/jobs?filter=${filter}`,
+    ).then((r) => r.jobs),
+
+  hirerJobs: (filter: JobListFilter) =>
+    authedFetch<{ jobs: JobListItem[] }>(
+      `/api/app/hirer/jobs?filter=${filter}`,
+    ).then((r) => r.jobs),
 };

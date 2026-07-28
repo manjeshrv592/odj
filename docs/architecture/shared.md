@@ -135,10 +135,18 @@ packages/shared/
   - `jobStatusSchema` (`searching|matched|cancelled|expired|no_workers`),
     `offerStatusSchema` (`pending|accepted|declined|cancelled|expired`).
   - `createJobSchema` `{ professionId, lat, lng }`; `jobViewSchema` / `JobView`
-    (`{ id, status, professionId, matchedWorker?: { name, lat, lng } }`, hirer poll).
+    (`{ id, status, professionId, matchedWorker?, otpToShow? }`, hirer poll — `otpToShow`
+    is the start code while `matched`, the end code while `in_progress`).
   - `workerOfferSchema` / `WorkerOffer` (`{ offerId, jobId, professionName, distanceKm,
     createdAt }`) + `workerOffersViewSchema`.
-  - `notificationTypeSchema` extended with `job_offer` / `job_matched` / `job_cancelled`.
+  - `jobStatusSchema` includes `in_progress` / `completed`. `workerJobViewSchema` /
+    `WorkerJobView` (worker's active job — `{ id, status, professionName, hirer:{name,
+    lat,lng}, startRequested }`). `verifyOtpSchema` `{ code }` (4 digits).
+  - `jobListFilterSchema` (`active|completed|cancelled`), `jobListItemSchema` /
+    `JobListItem` (`{ id, status, professionName, counterpartName, createdAt }`) +
+    `jobsListViewSchema` (worker/hirer Jobs tabs).
+  - `notificationTypeSchema` extended with `job_offer` / `job_matched` / `job_started` /
+    `job_completed` / `job_cancelled`.
 
 > Grows as features land. Prefer generating DB-owned shapes via `drizzle-zod`
 > (in backend) and re-exporting refined schemas here.

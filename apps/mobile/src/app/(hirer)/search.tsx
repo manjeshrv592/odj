@@ -58,17 +58,52 @@ export default function HirerSearch() {
         {/* Status card pinned over the map */}
         <View className="absolute inset-x-0 bottom-0 p-4">
           <Card className="gap-3">
-            {status === "matched" && worker ? (
+            {(status === "matched" || status === "in_progress") && worker ? (
               <>
                 <Text className="text-lg font-poppins-semibold text-foreground">
-                  ✅ {worker.name} is on the way
+                  {status === "in_progress"
+                    ? "🛠️ Job in progress"
+                    : `✅ ${worker.name} matched`}
                 </Text>
                 <Text className="text-sm text-muted-foreground">
-                  Your worker accepted the request. Their location is shown on the
-                  map.
+                  {status === "in_progress"
+                    ? "Show your worker this code to complete the job:"
+                    : job?.otpToShow
+                      ? `${worker.name} is here — show them this code to start:`
+                      : `${worker.name} accepted and is on the way. They'll start when they arrive.`}
+                </Text>
+                {job?.otpToShow ? (
+                  <Text className="text-center text-4xl font-poppins-semibold tracking-widest text-primary">
+                    {job.otpToShow}
+                  </Text>
+                ) : null}
+                <Button
+                  variant="outline"
+                  onPress={() => cancel.mutate()}
+                  disabled={cancel.isPending}
+                >
+                  <Text>{cancel.isPending ? "Cancelling…" : "Cancel job"}</Text>
+                </Button>
+              </>
+            ) : status === "completed" ? (
+              <>
+                <Text className="text-lg font-poppins-semibold text-foreground">
+                  ✅ Job complete
+                </Text>
+                <Text className="text-sm text-muted-foreground">
+                  The job was completed and verified. Thanks for using ODJ!
                 </Text>
                 <Button onPress={done}>
                   <Text>Done</Text>
+                </Button>
+              </>
+            ) : status === "cancelled" ? (
+              <>
+                <Text className="text-lg font-poppins-semibold text-foreground">
+                  Job cancelled
+                </Text>
+                <Button onPress={done}>
+                  <Text>Back to search</Text>
                 </Button>
               </>
             ) : status === "no_workers" ? (

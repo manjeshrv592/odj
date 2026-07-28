@@ -141,7 +141,23 @@ apps/backend/
     rest, pushes `job_matched` to the hirer), `POST /worker/offers/:id/decline`.
     **Hirer:** `POST /jobs` (find eligible workers via `lib/matching`, create job +
     offers, push `job_offer` to each), `GET /jobs/:id` (poll; lazy-expires stale
-    searches; includes `matchedWorker` when matched), `POST /jobs/:id/cancel`.
+    searches; includes `matchedWorker` + `otpToShow` for the current phase),
+    `POST /jobs/:id/cancel` (searching/matched/in_progress; notifies the worker).
+  - **Job lifecycle (start/end OTP):** on accept the job gets 4-digit `start_otp` +
+    `end_otp` (`make4DigitOtp`); the hirer *shows* them, the worker *enters* them. The
+    hirer's start code stays hidden until the worker taps **Start work**
+    (`POST /worker/job/:id/request-start` sets `start_requested_at`; `loadJobView`
+    gates `otpToShow` on it; `workerJobView` exposes `startRequested`).
+    `GET /worker/job` (active matched/in_progress job → `workerJobView`),
+    `POST /worker/job/:id/verify-start` (requires start requested; code==start_otp →
+    `in_progress`, push hirer `job_started`), `POST /worker/job/:id/verify-end` (→
+    `completed`, push `job_completed`), `POST /worker/job/:id/cancel`.
+    `notifyHirer(hirerProfileId, …)` helper (push-only).
+  - **Job lists:** `GET /worker/jobs?filter=active|completed|cancelled` +
+    `GET /hirer/jobs?filter=…` → `jobsListView` rows (profession + counterpart name +
+    date + status; role-specific status buckets, newest first).
+  - **Notifications:** job events use `pushUser` (push-only, no persistent row);
+    account notices (verification decisions) keep `notifyUser` (push + in-app row).
 
 ## src/routes/portal.ts
 - `portalRouter` (mounted `/api/portal`, all routes behind `requireAdmin`):
@@ -223,8 +239,10 @@ apps/backend/
 
 ## src/lib/notifications.ts
 - `createNotification(userId, input)` — persist one in-app `notifications` row.
-- `notifyUser(userId, input)` — create the row **and** push to the user's registered
-  `push_tokens` (via `sendExpoPush`). Email is sent separately by the caller.
+- `pushUser(userId, input)` — **push only** (no row), for transient job events shown by
+  live screens + the job lists (keeps the notifications list uncluttered).
+- `notifyUser(userId, input)` — create the row **and** `pushUser`. For account notices
+  (verification decisions) that belong in the persistent list. Email is sent separately.
 
 ## src/lib/matching.ts
 - `findEligibleWorkers(professionId, lat, lng, radiusKm)` — Haversine SQL selecting
@@ -276,7 +294,10 @@ apps/backend/
   `matched_worker_profile_id` FK→worker set-null, `expires_at`; index on `status`).
   `job_offers` — one offer per (job, worker) (`job_id`/`worker_profile_id` FKs cascade,
   `status`, `responded_at`; unique `(job_id, worker_profile_id)`, index on
-  `(worker_profile_id, status)`). Migration `0008_*`.
+  `(worker_profile_id, status)`). Migration `0008_*`. Migration `0009_*` extends
+  `jobStatus` with `in_progress`/`completed` and adds `jobs.start_otp`/`end_otp`/
+  `started_at`/`completed_at`/`cancelled_by` (the OTP handshake lifecycle); migration
+  `0010_*` adds `jobs.start_requested_at` (the worker's "Start work" gate).
 - `hirer_profiles` — one per user: names, `photo_url`, city/state/lat/lng,
   `hirer_type`, `org_name`, `org_type`, `gst_registered`, `gstin`, `status`,
   `current_step`, `submitted_at`, the same `rejection_reason`/`reviewed_at`/

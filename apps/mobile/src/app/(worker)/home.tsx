@@ -1,20 +1,16 @@
 import * as React from "react";
 import { View, ScrollView, ActivityIndicator, Alert } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { useRouter } from "expo-router";
+import { useRouter, type Href } from "expo-router";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import type { WorkerOffer } from "@odj/shared";
-import { signOut } from "@/lib/auth-client";
 import {
   appApi,
   ONBOARDING_STATE_KEY,
-  NOTIFICATIONS_KEY,
   WORKER_OFFERS_KEY,
 } from "@/lib/app-api";
 import { useOnboardingState } from "@/lib/use-onboarding";
-import { useWorkerOffers } from "@/lib/use-worker";
-import { ThemeToggle } from "@/components/theme-toggle";
-import { NotificationsList } from "@/components/notifications-list";
+import { useWorkerOffers, useWorkerJob } from "@/lib/use-worker";
 import { Text } from "@/components/ui/text";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -62,6 +58,8 @@ export default function WorkerHome() {
   const qc = useQueryClient();
   const { data: state } = useOnboardingState();
 
+  const { data: activeJob } = useWorkerJob();
+
   const [online, setOnline] = React.useState(false);
   // Seed the toggle from the server's persisted presence once loaded.
   React.useEffect(() => {
@@ -87,20 +85,13 @@ export default function WorkerHome() {
     },
     onSuccess: (_data, v) => {
       qc.invalidateQueries({ queryKey: WORKER_OFFERS_KEY });
-      if (v.accept) Alert.alert("You got the job! 🎉", "The hirer has been notified.");
+      if (v.accept) router.push("/job" as Href);
     },
     onError: (e: Error) => {
       qc.invalidateQueries({ queryKey: WORKER_OFFERS_KEY });
       Alert.alert("Request unavailable", e.message);
     },
   });
-
-  async function handleSignOut() {
-    await signOut();
-    qc.removeQueries({ queryKey: ONBOARDING_STATE_KEY });
-    qc.removeQueries({ queryKey: NOTIFICATIONS_KEY });
-    router.replace("/(auth)/login");
-  }
 
   return (
     <SafeAreaView className="flex-1 bg-background">
@@ -113,6 +104,27 @@ export default function WorkerHome() {
             Go online to start receiving job requests near you.
           </Text>
         </View>
+
+        {activeJob ? (
+          <Button
+            className="h-auto items-center justify-start gap-3 border-primary p-4"
+            variant="outline"
+            onPress={() => router.push("/job" as Href)}
+          >
+            <Text className="text-2xl">🧰</Text>
+            <View className="flex-1">
+              <Text className="font-poppins-medium text-foreground">
+                Active job — {activeJob.professionName}
+              </Text>
+              <Text className="text-sm text-muted-foreground">
+                {activeJob.status === "in_progress"
+                  ? "In progress · tap to complete"
+                  : "Tap to head over & start"}
+              </Text>
+            </View>
+            <Text className="text-2xl text-muted-foreground">›</Text>
+          </Button>
+        ) : null}
 
         <Card className="flex-row items-center justify-between">
           <View className="flex-1">
@@ -160,25 +172,7 @@ export default function WorkerHome() {
             )}
           </View>
         ) : null}
-
-        <Button variant="outline" onPress={() => router.push("/dashboard")}>
-          <Text>Manage rates &amp; availability</Text>
-        </Button>
-
-        <View className="gap-2">
-          <Text className="font-poppins-medium text-foreground">Notifications</Text>
-          <NotificationsList />
-        </View>
-
-        <View className="items-center pt-2">
-          <ThemeToggle />
-        </View>
       </ScrollView>
-      <View className="p-6">
-        <Button variant="ghost" onPress={handleSignOut}>
-          <Text>Sign out</Text>
-        </Button>
-      </View>
     </SafeAreaView>
   );
 }

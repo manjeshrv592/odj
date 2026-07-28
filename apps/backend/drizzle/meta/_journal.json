@@ -64,6 +64,20 @@
       "when": 1785231232958,
       "tag": "0008_abandoned_mattie_franklin",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1785272768812,
+      "tag": "0009_nice_revanche",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1785274324305,
+      "tag": "0010_lonely_silver_samurai",
+      "breakpoints": true
     }
   ]
 }

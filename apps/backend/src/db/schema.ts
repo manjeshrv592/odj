@@ -362,6 +362,8 @@ export const notifications = pgTable(
 export const jobStatus = pgEnum("job_status", [
   "searching",
   "matched",
+  "in_progress",
+  "completed",
   "cancelled",
   "expired",
   "no_workers",
@@ -399,6 +401,15 @@ export const jobs = pgTable(
       () => workerProfiles.id,
       { onDelete: "set null" },
     ),
+    // OTP handshake: hirer shows, worker enters — start moves to in_progress,
+    // end moves to completed. Generated when the job is matched. The hirer's start
+    // code stays hidden until the worker taps "Start work" (`startRequestedAt`).
+    startOtp: text("start_otp"),
+    endOtp: text("end_otp"),
+    startRequestedAt: timestamp("start_requested_at"),
+    startedAt: timestamp("started_at"),
+    completedAt: timestamp("completed_at"),
+    cancelledBy: text("cancelled_by"), // 'hirer' | 'worker'
     createdAt: timestamp("created_at").notNull().defaultNow(),
     expiresAt: timestamp("expires_at").notNull(),
     updatedAt: timestamp("updated_at").notNull().defaultNow(),
