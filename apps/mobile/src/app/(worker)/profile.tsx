@@ -11,6 +11,8 @@ import { NotificationsList } from "@/components/notifications-list";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { Text } from "@/components/ui/text";
 import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
+import { StarRating } from "@/components/ui/star-rating";
 
 type StepKey = "rates" | "availability" | "location";
 
@@ -58,6 +60,18 @@ export default function WorkerProfile() {
         <Text className="pt-2 text-2xl font-poppins-semibold text-foreground">
           Profile
         </Text>
+
+        <Card className="flex-row items-center justify-between">
+          <Text className="font-poppins-medium text-foreground">Your rating</Text>
+          <View className="items-end gap-1">
+            <StarRating value={Math.round(worker?.avgRating ?? 0)} size="sm" />
+            <Text className="text-sm text-muted-foreground">
+              {worker?.ratingCount
+                ? `${worker.avgRating!.toFixed(1)} (${worker.ratingCount})`
+                : "No ratings yet"}
+            </Text>
+          </View>
+        </Card>
 
         <View className="gap-2">
           <Text className="font-poppins-medium text-foreground">Your setup</Text>

@@ -1,7 +1,7 @@
 import * as React from "react";
-import { View, ScrollView, ActivityIndicator, Alert } from "react-native";
+import { View, ScrollView, ActivityIndicator, Alert, Pressable } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { useRouter } from "expo-router";
+import { useRouter, type Href } from "expo-router";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { appApi, WORKER_JOB_KEY } from "@/lib/app-api";
 import { useWorkerJob } from "@/lib/use-worker";
@@ -17,7 +17,6 @@ export default function WorkerJobScreen() {
   const qc = useQueryClient();
   const { data: job, isLoading } = useWorkerJob();
   const [code, setCode] = React.useState("");
-  const [completed, setCompleted] = React.useState(false);
 
   const verify = useMutation({
     mutationFn: (phase: "start" | "end") =>
@@ -26,8 +25,10 @@ export default function WorkerJobScreen() {
         : appApi.verifyEnd(job!.id, code),
     onSuccess: async (_d, phase) => {
       setCode("");
-      if (phase === "end") setCompleted(true);
       await qc.invalidateQueries({ queryKey: WORKER_JOB_KEY });
+      if (phase === "end") {
+        router.replace(`/(worker)/rate-job?jobId=${job!.id}` as Href);
+      }
     },
     onError: (e: Error) => Alert.alert("Couldn't verify", e.message),
   });
@@ -48,24 +49,6 @@ export default function WorkerJobScreen() {
   });
 
   const finish = () => router.replace("/home");
-
-  // Completed (locally, since the job drops off the active list once done).
-  if (completed) {
-    return (
-      <SafeAreaView className="flex-1 items-center justify-center gap-4 bg-background p-6">
-        <Text className="text-5xl">✅</Text>
-        <Text className="text-2xl font-poppins-semibold text-foreground">
-          Job complete
-        </Text>
-        <Text className="text-center text-muted-foreground">
-          Nice work. The hirer has been notified.
-        </Text>
-        <Button onPress={finish}>
-          <Text>Done</Text>
-        </Button>
-      </SafeAreaView>
-    );
-  }
 
   if (isLoading) {
     return (
@@ -105,9 +88,16 @@ export default function WorkerJobScreen() {
           <Text className="text-2xl font-poppins-semibold text-foreground">
             {started ? "Job in progress" : "Head to the hirer"}
           </Text>
-          <Text className="text-muted-foreground">
-            {job.professionName} · {job.hirer.name}
-          </Text>
+          <Pressable
+            onPress={() =>
+              router.push(`/(worker)/hirer-profile?id=${job.hirer.id}` as Href)
+            }
+          >
+            <Text className="text-muted-foreground">
+              {job.professionName} · {job.hirer.name}
+            </Text>
+            <Text className="text-sm text-primary">View profile →</Text>
+          </Pressable>
         </View>
 
         {center ? (
@@ -156,6 +146,13 @@ export default function WorkerJobScreen() {
             </Button>
           </Card>
         )}
+
+        <Button
+          variant="outline"
+          onPress={() => router.push(`/(worker)/chat?jobId=${job.id}` as Href)}
+        >
+          <Text>💬 Chat</Text>
+        </Button>
 
         <Button
           variant="ghost"

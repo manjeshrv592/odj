@@ -621,6 +621,8 @@ export const workerProfileSchema = z.object({
   availabilityReviewedAt: z.coerce.date().nullish(),
   setupCompletedAt: z.coerce.date().nullish(),
   isOnline: z.boolean().default(false),
+  avgRating: z.number().nullish(),
+  ratingCount: z.number().int().default(0),
 });
 export type WorkerProfile = z.infer<typeof workerProfileSchema>;
 
@@ -730,6 +732,8 @@ export const hirerProfileSchema = z.object({
   status: profileStatusSchema,
   currentStep: z.number().int(),
   rejectionReason: z.string().nullish(),
+  avgRating: z.number().nullish(),
+  ratingCount: z.number().int().default(0),
 });
 export type HirerProfile = z.infer<typeof hirerProfileSchema>;
 
@@ -847,6 +851,8 @@ export const notificationTypeSchema = z.enum([
   "job_started",
   "job_completed",
   "job_cancelled",
+  "job_rated",
+  "chat_message",
 ]);
 export type NotificationType = z.infer<typeof notificationTypeSchema>;
 
@@ -1007,6 +1013,7 @@ export const jobViewSchema = z.object({
   professionId: z.uuid(),
   matchedWorker: z
     .object({
+      id: z.uuid(),
       name: z.string(),
       lat: z.number().nullish(),
       lng: z.number().nullish(),
@@ -1022,6 +1029,7 @@ export const workerJobViewSchema = z.object({
   status: jobStatusSchema,
   professionName: z.string(),
   hirer: z.object({
+    id: z.uuid(),
     name: z.string(),
     lat: z.number().nullish(),
     lng: z.number().nullish(),
@@ -1040,7 +1048,13 @@ export const jobListItemSchema = z.object({
   status: jobStatusSchema,
   professionName: z.string(),
   counterpartName: z.string(),
+  // The other party's profile id — null when no worker ever matched (e.g. a
+  // cancelled/expired/no_workers hirer job). Links to the profile-view screens.
+  counterpartProfileId: z.uuid().nullish(),
   createdAt: z.coerce.date(),
+  // Only meaningful when status === "completed" — has the caller already rated
+  // the other party for this job? Drives the Jobs tab "Rate" / "Rated ✓" affordance.
+  ratedByMe: z.boolean().default(false),
 });
 export type JobListItem = z.infer<typeof jobListItemSchema>;
 
@@ -1067,3 +1081,120 @@ export const workerOffersViewSchema = z.object({
   offers: z.array(workerOfferSchema),
 });
 export type WorkerOffersView = z.infer<typeof workerOffersViewSchema>;
+
+// ── Ratings (§8) ───────────────────────────────────────────────────────────────
+
+/** Which party is rating whom — resolved server-side from job ownership. */
+export const ratingDirectionSchema = z.enum(["worker_to_hirer", "hirer_to_worker"]);
+export type RatingDirection = z.infer<typeof ratingDirectionSchema>;
+
+/** Submit a rating for a completed job (POST /api/app/jobs/:id/rating). */
+export const submitRatingSchema = z.object({
+  stars: z.number().int().min(1).max(5),
+  comment: z.string().trim().max(500).nullish(),
+});
+export type SubmitRating = z.infer<typeof submitRatingSchema>;
+
+/** A previously submitted rating (read-only once created — see §8 decisions). */
+export const ratingSchema = z.object({
+  stars: z.number().int().min(1).max(5),
+  comment: z.string().nullish(),
+  createdAt: z.coerce.date(),
+});
+export type Rating = z.infer<typeof ratingSchema>;
+
+/** GET /api/app/jobs/:id/rating — context for the rate-job screen. */
+export const jobRatingViewSchema = z.object({
+  job: z.object({
+    id: z.uuid(),
+    professionName: z.string(),
+    counterpartName: z.string(),
+    status: jobStatusSchema,
+  }),
+  canRate: z.boolean(),
+  myRating: ratingSchema.nullish(),
+});
+export type JobRatingView = z.infer<typeof jobRatingViewSchema>;
+
+/**
+ * Narrow public profile a hirer sees when viewing a worker they've matched
+ * with (GET /api/app/hirer/worker/:workerProfileId) — deliberately not the
+ * full `workerProfileSchema` (which carries onboarding-internal fields).
+ */
+export const workerProfileViewSchema = z.object({
+  id: z.uuid(),
+  firstName: z.string().nullish(),
+  lastName: z.string().nullish(),
+  photoUrl: z.url().nullish(),
+  city: z.string().nullish(),
+  state: z.string().nullish(),
+  professions: z.array(z.object({ id: z.uuid(), name: z.string() })),
+  avgRating: z.number().nullish(),
+  ratingCount: z.number().int().default(0),
+});
+export type WorkerProfileView = z.infer<typeof workerProfileViewSchema>;
+
+/**
+ * Narrow public profile a worker sees when viewing a hirer they've worked for
+ * (GET /api/app/worker/hirer/:hirerProfileId) — no business/org fields.
+ */
+export const hirerProfileViewSchema = z.object({
+  id: z.uuid(),
+  firstName: z.string().nullish(),
+  lastName: z.string().nullish(),
+  photoUrl: z.url().nullish(),
+  city: z.string().nullish(),
+  state: z.string().nullish(),
+  avgRating: z.number().nullish(),
+  ratingCount: z.number().int().default(0),
+});
+export type HirerProfileView = z.infer<typeof hirerProfileViewSchema>;
+
+// ── Chat (§7) ────────────────────────────────────────────────────────────────
+
+/** Which party sent a message — resolved server-side from job ownership. */
+export const chatSenderRoleSchema = z.enum(["worker", "hirer"]);
+export type ChatSenderRole = z.infer<typeof chatSenderRoleSchema>;
+
+/** Free text or a one-off shared location — no files/images. */
+export const chatMessageTypeSchema = z.enum(["text", "location"]);
+export type ChatMessageType = z.infer<typeof chatMessageTypeSchema>;
+
+export const chatMessageSchema = z.object({
+  id: z.uuid(),
+  senderRole: chatSenderRoleSchema,
+  type: chatMessageTypeSchema,
+  body: z.string().nullish(),
+  lat: z.number().nullish(),
+  lng: z.number().nullish(),
+  createdAt: z.coerce.date(),
+});
+export type ChatMessage = z.infer<typeof chatMessageSchema>;
+
+/** GET /api/app/jobs/:id/chat — history + whether the caller can still send. */
+export const jobChatViewSchema = z.object({
+  messages: z.array(chatMessageSchema),
+  canSend: z.boolean(),
+});
+export type JobChatView = z.infer<typeof jobChatViewSchema>;
+
+/** Payload of a `{type:"send"}` WS frame — discriminated on message type. */
+export const sendChatMessageSchema = z.discriminatedUnion("type", [
+  z.object({ type: z.literal("text"), body: z.string().trim().min(1).max(1000) }),
+  z.object({
+    type: z.literal("location"),
+    lat: z.number().min(-90).max(90),
+    lng: z.number().min(-180).max(180),
+  }),
+]);
+export type SendChatMessage = z.infer<typeof sendChatMessageSchema>;
+
+/** Client→server WS frames on `/ws/chat` — shared wire-protocol shape. */
+export const chatWsClientFrameSchema = z.discriminatedUnion("type", [
+  z.object({ type: z.literal("join"), jobId: z.uuid() }),
+  z.object({ type: z.literal("send"), message: sendChatMessageSchema }),
+  // Fire on composer input (client-throttled); server rebroadcasts to the
+  // other party only — ephemeral, not persisted.
+  z.object({ type: z.literal("typing") }),
+]);
+export type ChatWsClientFrame = z.infer<typeof chatWsClientFrameSchema>;

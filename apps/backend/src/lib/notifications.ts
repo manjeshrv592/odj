@@ -48,7 +48,14 @@ export async function pushUser(
 
   await sendExpoPush(
     tokens.map((t) => t.token),
-    { title: input.title, body: input.body, data: input.data },
+    {
+      title: input.title,
+      body: input.body,
+      // `type` rides along in `data` (not just this call's payload) so the client
+      // can route a notification tap without a separate lookup — see mobile's
+      // `useNotificationTapRouting`.
+      data: { ...input.data, type: input.type },
+    },
   );
 }
 

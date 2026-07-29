@@ -16,7 +16,7 @@ import {
 import { Providers } from "@/components/providers";
 import { useSession } from "@/lib/auth-client";
 import { useOnboardingState } from "@/lib/use-onboarding";
-import { usePushRegistration } from "@/lib/use-push";
+import { usePushRegistration, useNotificationTapRouting } from "@/lib/use-push";
 
 /**
  * Auth/onboarding routing gate. Watches the better-auth session and the mobile
@@ -40,8 +40,10 @@ function SessionGate({ children }: { children: React.ReactNode }) {
   const segments = useSegments();
   const router = useRouter();
 
-  // Register this device's Expo push token once signed in (best-effort).
+  // Register this device's Expo push token once signed in (best-effort), and
+  // route a tapped notification to the right screen (e.g. job_completed → rate).
   usePushRegistration();
+  useNotificationTapRouting(state?.userType);
 
   useEffect(() => {
     if (isPending) return;

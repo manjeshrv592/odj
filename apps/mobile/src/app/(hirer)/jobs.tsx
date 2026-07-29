@@ -20,6 +20,17 @@ export default function HirerJobs() {
           onOpenActive={(item) =>
             router.push(`/(hirer)/search?jobId=${item.id}` as Href)
           }
+          onRate={(item) =>
+            router.push(`/(hirer)/rate-job?jobId=${item.id}` as Href)
+          }
+          onViewProfile={(item) =>
+            router.push(
+              `/(hirer)/worker-profile?id=${item.counterpartProfileId}` as Href,
+            )
+          }
+          onOpenChat={(item) =>
+            router.push(`/(hirer)/chat?jobId=${item.id}` as Href)
+          }
         />
       </ScrollView>
     </SafeAreaView>

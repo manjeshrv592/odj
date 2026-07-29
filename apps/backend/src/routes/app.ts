@@ -16,6 +16,7 @@ import {
   setOnlineSchema,
   createJobSchema,
   verifyOtpSchema,
+  submitRatingSchema,
   type Category,
   type Profession,
   type WorkerProfile,
@@ -29,6 +30,11 @@ import {
   type WorkerOffer,
   type WorkerJobView,
   type JobListItem,
+  type JobRatingView,
+  type WorkerProfileView,
+  type HirerProfileView,
+  type RatingDirection,
+  type JobChatView,
 } from "@odj/shared";
 import { db } from "../db";
 import {
@@ -43,6 +49,8 @@ import {
   jobOffers,
   pushTokens,
   notifications,
+  ratings,
+  chatMessages,
   user,
 } from "../db/schema";
 import { requireUser } from "../middleware/require-user";
@@ -53,6 +61,8 @@ import {
   haversineKm,
   DEFAULT_RADIUS_KM,
 } from "../lib/matching";
+import { resolveChatParty, CHAT_ACTIVE_STATUSES } from "../lib/chat-ws";
+import { endRoom as endChatRoom } from "../lib/chat-hub";
 
 /**
  * Mobile app API for workers & hirers. Authenticated (`requireUser`, non-admin)
@@ -132,6 +142,8 @@ async function loadWorkerProfile(userId: string): Promise<WorkerProfile | null> 
     availabilityReviewedAt: row.availabilityReviewedAt,
     setupCompletedAt: row.setupCompletedAt,
     isOnline: row.isOnline,
+    avgRating: row.avgRating,
+    ratingCount: row.ratingCount,
   };
 }
 
@@ -159,6 +171,8 @@ async function loadHirerProfile(userId: string): Promise<HirerProfile | null> {
     status: row.status,
     currentStep: row.currentStep,
     rejectionReason: row.rejectionReason,
+    avgRating: row.avgRating,
+    ratingCount: row.ratingCount,
   };
 }
 
@@ -751,6 +765,7 @@ async function loadJobView(jobId: string): Promise<JobView | null> {
   if (job.matchedWorkerProfileId) {
     const [w] = await db
       .select({
+        id: workerProfiles.id,
         firstName: workerProfiles.firstName,
         lastName: workerProfiles.lastName,
         lat: workerProfiles.lat,
@@ -761,6 +776,7 @@ async function loadJobView(jobId: string): Promise<JobView | null> {
       .limit(1);
     if (w) {
       matchedWorker = {
+        id: w.id,
         name: [w.firstName, w.lastName].filter(Boolean).join(" ") || "Worker",
         lat: w.lat,
         lng: w.lng,
@@ -1091,6 +1107,7 @@ appRouter.post("/jobs/:id/cancel", async (req: Request, res: Response) => {
         });
       }
     }
+    endChatRoom(job.id);
   }
   res.status(204).end();
 });
@@ -1110,6 +1127,19 @@ async function notifyHirer(
   if (h) await pushUser(h.userId, input);
 }
 
+/** Push a job event to the worker (push-only, symmetric with {@link notifyHirer}). */
+async function notifyWorker(
+  workerProfileId: string,
+  input: Parameters<typeof pushUser>[1],
+): Promise<void> {
+  const [w] = await db
+    .select({ userId: workerProfiles.userId })
+    .from(workerProfiles)
+    .where(eq(workerProfiles.id, workerProfileId))
+    .limit(1);
+  if (w) await pushUser(w.userId, input);
+}
+
 // GET /api/app/worker/job — the worker's current active job (matched/in_progress).
 appRouter.get("/worker/job", async (req: Request, res: Response) => {
   const u = req.appUser!;
@@ -1121,6 +1151,7 @@ appRouter.get("/worker/job", async (req: Request, res: Response) => {
       id: jobs.id,
       status: jobs.status,
       professionName: professions.name,
+      hirerProfileId: hirerProfiles.id,
       hirerFirst: hirerProfiles.firstName,
       hirerLast: hirerProfiles.lastName,
       hirerLat: jobs.lat,
@@ -1148,6 +1179,7 @@ appRouter.get("/worker/job", async (req: Request, res: Response) => {
     status: row.status,
     professionName: row.professionName,
     hirer: {
+      id: row.hirerProfileId,
       name: [row.hirerFirst, row.hirerLast].filter(Boolean).join(" ") || "Hirer",
       lat: row.hirerLat,
       lng: row.hirerLng,
@@ -1272,6 +1304,7 @@ appRouter.post(
       body: "Your worker verified the completion code — the job is done.",
       data: { jobId: job.id },
     });
+    endChatRoom(job.id);
     res.json({ status: "completed" });
   },
 );
@@ -1302,6 +1335,7 @@ appRouter.post(
         body: "The worker cancelled the job.",
         data: { jobId: job.id },
       });
+      endChatRoom(job.id);
     }
     res.status(204).end();
   },
@@ -1329,13 +1363,19 @@ appRouter.get("/worker/jobs", async (req: Request, res: Response) => {
       id: jobs.id,
       status: jobs.status,
       professionName: professions.name,
+      hirerProfileId: hirerProfiles.id,
       hirerFirst: hirerProfiles.firstName,
       hirerLast: hirerProfiles.lastName,
       createdAt: jobs.createdAt,
+      ratingId: ratings.id,
     })
     .from(jobs)
     .innerJoin(professions, eq(jobs.professionId, professions.id))
     .innerJoin(hirerProfiles, eq(jobs.hirerProfileId, hirerProfiles.id))
+    .leftJoin(
+      ratings,
+      and(eq(ratings.jobId, jobs.id), eq(ratings.direction, "worker_to_hirer")),
+    )
     .where(
       and(
         eq(jobs.matchedWorkerProfileId, profile.id),
@@ -1351,7 +1391,9 @@ appRouter.get("/worker/jobs", async (req: Request, res: Response) => {
     professionName: r.professionName,
     counterpartName:
       [r.hirerFirst, r.hirerLast].filter(Boolean).join(" ") || "Hirer",
+    counterpartProfileId: r.hirerProfileId,
     createdAt: r.createdAt,
+    ratedByMe: r.ratingId != null,
   }));
   res.json({ jobs: list });
 });
@@ -1374,13 +1416,19 @@ appRouter.get("/hirer/jobs", async (req: Request, res: Response) => {
       id: jobs.id,
       status: jobs.status,
       professionName: professions.name,
+      workerProfileId: workerProfiles.id,
       workerFirst: workerProfiles.firstName,
       workerLast: workerProfiles.lastName,
       createdAt: jobs.createdAt,
+      ratingId: ratings.id,
     })
     .from(jobs)
     .innerJoin(professions, eq(jobs.professionId, professions.id))
     .leftJoin(workerProfiles, eq(jobs.matchedWorkerProfileId, workerProfiles.id))
+    .leftJoin(
+      ratings,
+      and(eq(ratings.jobId, jobs.id), eq(ratings.direction, "hirer_to_worker")),
+    )
     .where(
       and(eq(jobs.hirerProfileId, hirer.id), inArray(jobs.status, statuses)),
     )
@@ -1393,9 +1441,354 @@ appRouter.get("/hirer/jobs", async (req: Request, res: Response) => {
     professionName: r.professionName,
     counterpartName:
       [r.workerFirst, r.workerLast].filter(Boolean).join(" ") || "—",
+    counterpartProfileId: r.workerProfileId,
     createdAt: r.createdAt,
+    ratedByMe: r.ratingId != null,
   }));
   res.json({ jobs: list });
+});
+
+// ── Ratings (§8) ───────────────────────────────────────────────────────────────
+
+/** Postgres unique-violation error code (23505). */
+function isUniqueViolation(error: unknown): boolean {
+  return (error as { code?: string } | null)?.code === "23505";
+}
+
+/**
+ * Resolve which party the caller is for a job (job-history-based — works even
+ * if the caller's profile is no longer `approved`) and who they'd be rating.
+ * Returns null if the caller wasn't a party to this job.
+ */
+async function resolveRatingParty(
+  job: typeof jobs.$inferSelect,
+  userId: string,
+): Promise<{ direction: RatingDirection; rateeProfileId: string } | null> {
+  const [worker] = await db
+    .select({ id: workerProfiles.id })
+    .from(workerProfiles)
+    .where(eq(workerProfiles.userId, userId))
+    .limit(1);
+  if (worker && job.matchedWorkerProfileId === worker.id) {
+    return { direction: "worker_to_hirer", rateeProfileId: job.hirerProfileId };
+  }
+  const [hirer] = await db
+    .select({ id: hirerProfiles.id })
+    .from(hirerProfiles)
+    .where(eq(hirerProfiles.userId, userId))
+    .limit(1);
+  if (hirer && job.hirerProfileId === hirer.id && job.matchedWorkerProfileId) {
+    return {
+      direction: "hirer_to_worker",
+      rateeProfileId: job.matchedWorkerProfileId,
+    };
+  }
+  return null;
+}
+
+// GET /api/app/jobs/:id/rating — context for the rate-job screen.
+appRouter.get("/jobs/:id/rating", async (req: Request, res: Response) => {
+  const u = req.appUser!;
+  const [job] = await db
+    .select()
+    .from(jobs)
+    .where(eq(jobs.id, String(req.params.id)))
+    .limit(1);
+  if (!job) {
+    res.status(404).json({ error: "Job not found" });
+    return;
+  }
+  const party = await resolveRatingParty(job, u.id);
+  if (!party) {
+    res.status(404).json({ error: "Job not found" });
+    return;
+  }
+
+  const [profession] = await db
+    .select({ name: professions.name })
+    .from(professions)
+    .where(eq(professions.id, job.professionId))
+    .limit(1);
+
+  let counterpartName = "—";
+  if (party.direction === "worker_to_hirer") {
+    const [h] = await db
+      .select({ firstName: hirerProfiles.firstName, lastName: hirerProfiles.lastName })
+      .from(hirerProfiles)
+      .where(eq(hirerProfiles.id, job.hirerProfileId))
+      .limit(1);
+    if (h) counterpartName = [h.firstName, h.lastName].filter(Boolean).join(" ") || "Hirer";
+  } else {
+    const [w] = await db
+      .select({ firstName: workerProfiles.firstName, lastName: workerProfiles.lastName })
+      .from(workerProfiles)
+      .where(eq(workerProfiles.id, job.matchedWorkerProfileId!))
+      .limit(1);
+    if (w) counterpartName = [w.firstName, w.lastName].filter(Boolean).join(" ") || "Worker";
+  }
+
+  const [existing] = await db
+    .select()
+    .from(ratings)
+    .where(and(eq(ratings.jobId, job.id), eq(ratings.direction, party.direction)))
+    .limit(1);
+
+  const view: JobRatingView = {
+    job: {
+      id: job.id,
+      professionName: profession?.name ?? "",
+      counterpartName,
+      status: job.status,
+    },
+    canRate: job.status === "completed" && !existing,
+    myRating: existing
+      ? { stars: existing.stars, comment: existing.comment, createdAt: existing.createdAt }
+      : null,
+  };
+  res.json(view);
+});
+
+// POST /api/app/jobs/:id/rating — submit a one-shot rating for a completed job.
+appRouter.post("/jobs/:id/rating", async (req: Request, res: Response) => {
+  const parsed = submitRatingSchema.safeParse(req.body);
+  if (!parsed.success) return invalid(res, parsed.error);
+  const u = req.appUser!;
+
+  const [job] = await db
+    .select()
+    .from(jobs)
+    .where(eq(jobs.id, String(req.params.id)))
+    .limit(1);
+  if (!job) {
+    res.status(404).json({ error: "Job not found" });
+    return;
+  }
+  const party = await resolveRatingParty(job, u.id);
+  if (!party) {
+    res.status(404).json({ error: "Job not found" });
+    return;
+  }
+  if (job.status !== "completed") {
+    res.status(409).json({ error: "Job isn't completed yet" });
+    return;
+  }
+
+  const { stars, comment } = parsed.data;
+  try {
+    if (party.direction === "worker_to_hirer") {
+      await db.transaction(async (tx) => {
+        const [profile] = await tx
+          .select()
+          .from(hirerProfiles)
+          .where(eq(hirerProfiles.id, party.rateeProfileId))
+          .for("update");
+        const newCount = profile!.ratingCount + 1;
+        const newAvg =
+          ((profile!.avgRating ?? 0) * profile!.ratingCount + stars) / newCount;
+        await tx
+          .update(hirerProfiles)
+          .set({ avgRating: newAvg, ratingCount: newCount, updatedAt: new Date() })
+          .where(eq(hirerProfiles.id, party.rateeProfileId));
+        await tx
+          .insert(ratings)
+          .values({ jobId: job.id, direction: party.direction, stars, comment: comment ?? null });
+      });
+    } else {
+      await db.transaction(async (tx) => {
+        const [profile] = await tx
+          .select()
+          .from(workerProfiles)
+          .where(eq(workerProfiles.id, party.rateeProfileId))
+          .for("update");
+        const newCount = profile!.ratingCount + 1;
+        const newAvg =
+          ((profile!.avgRating ?? 0) * profile!.ratingCount + stars) / newCount;
+        await tx
+          .update(workerProfiles)
+          .set({ avgRating: newAvg, ratingCount: newCount, updatedAt: new Date() })
+          .where(eq(workerProfiles.id, party.rateeProfileId));
+        await tx
+          .insert(ratings)
+          .values({ jobId: job.id, direction: party.direction, stars, comment: comment ?? null });
+      });
+    }
+  } catch (e) {
+    if (isUniqueViolation(e)) {
+      res.status(409).json({ error: "You've already rated this job" });
+      return;
+    }
+    throw e;
+  }
+
+  const ratee = { type: "job_rated" as const, title: "You've been rated", body: `You received a ${stars}-star rating.`, data: { jobId: job.id } };
+  if (party.direction === "worker_to_hirer") {
+    await notifyHirer(job.hirerProfileId, ratee);
+  } else {
+    await notifyWorker(job.matchedWorkerProfileId!, ratee);
+  }
+
+  res.json({ ok: true });
+});
+
+// GET /api/app/hirer/worker/:workerProfileId — a matched worker's public rating view.
+appRouter.get(
+  "/hirer/worker/:workerProfileId",
+  async (req: Request, res: Response) => {
+    const u = req.appUser!;
+    const [hirer] = await db
+      .select({ id: hirerProfiles.id })
+      .from(hirerProfiles)
+      .where(eq(hirerProfiles.userId, u.id))
+      .limit(1);
+    if (!hirer) {
+      res.status(404).json({ error: "Worker not found" });
+      return;
+    }
+    const workerProfileId = String(req.params.workerProfileId);
+
+    const [linked] = await db
+      .select({ id: jobs.id })
+      .from(jobs)
+      .where(
+        and(
+          eq(jobs.hirerProfileId, hirer.id),
+          eq(jobs.matchedWorkerProfileId, workerProfileId),
+        ),
+      )
+      .limit(1);
+    if (!linked) {
+      res.status(404).json({ error: "Worker not found" });
+      return;
+    }
+
+    const [w] = await db
+      .select()
+      .from(workerProfiles)
+      .where(eq(workerProfiles.id, workerProfileId))
+      .limit(1);
+    if (!w) {
+      res.status(404).json({ error: "Worker not found" });
+      return;
+    }
+
+    const professionRows = await db
+      .select({ id: professions.id, name: professions.name })
+      .from(workerProfessions)
+      .innerJoin(professions, eq(workerProfessions.professionId, professions.id))
+      .where(eq(workerProfessions.workerProfileId, w.id));
+
+    const view: WorkerProfileView = {
+      id: w.id,
+      firstName: w.firstName,
+      lastName: w.lastName,
+      photoUrl: w.photoUrl,
+      city: w.city,
+      state: w.state,
+      professions: professionRows,
+      avgRating: w.avgRating,
+      ratingCount: w.ratingCount,
+    };
+    res.json(view);
+  },
+);
+
+// GET /api/app/worker/hirer/:hirerProfileId — a worked-for hirer's public rating view.
+appRouter.get(
+  "/worker/hirer/:hirerProfileId",
+  async (req: Request, res: Response) => {
+    const u = req.appUser!;
+    const [worker] = await db
+      .select({ id: workerProfiles.id })
+      .from(workerProfiles)
+      .where(eq(workerProfiles.userId, u.id))
+      .limit(1);
+    if (!worker) {
+      res.status(404).json({ error: "Hirer not found" });
+      return;
+    }
+    const hirerProfileId = String(req.params.hirerProfileId);
+
+    const [linked] = await db
+      .select({ id: jobs.id })
+      .from(jobs)
+      .where(
+        and(
+          eq(jobs.matchedWorkerProfileId, worker.id),
+          eq(jobs.hirerProfileId, hirerProfileId),
+        ),
+      )
+      .limit(1);
+    if (!linked) {
+      res.status(404).json({ error: "Hirer not found" });
+      return;
+    }
+
+    const [h] = await db
+      .select()
+      .from(hirerProfiles)
+      .where(eq(hirerProfiles.id, hirerProfileId))
+      .limit(1);
+    if (!h) {
+      res.status(404).json({ error: "Hirer not found" });
+      return;
+    }
+
+    const view: HirerProfileView = {
+      id: h.id,
+      firstName: h.firstName,
+      lastName: h.lastName,
+      photoUrl: h.photoUrl,
+      city: h.city,
+      state: h.state,
+      avgRating: h.avgRating,
+      ratingCount: h.ratingCount,
+    };
+    res.json(view);
+  },
+);
+
+// ── Chat (§7) ────────────────────────────────────────────────────────────────
+
+// GET /api/app/jobs/:id/chat — history (live send happens over WS /ws/chat).
+// Read access is job-history-based (any job the caller was ever part of);
+// `canSend` mirrors the WS server's live check so the UI can hide the
+// composer once the job ends, while the transcript stays visible.
+appRouter.get("/jobs/:id/chat", async (req: Request, res: Response) => {
+  const u = req.appUser!;
+  const [job] = await db
+    .select()
+    .from(jobs)
+    .where(eq(jobs.id, String(req.params.id)))
+    .limit(1);
+  if (!job) {
+    res.status(404).json({ error: "Job not found" });
+    return;
+  }
+  const party = await resolveChatParty(job, u.id);
+  if (!party) {
+    res.status(404).json({ error: "Job not found" });
+    return;
+  }
+
+  const rows = await db
+    .select()
+    .from(chatMessages)
+    .where(eq(chatMessages.jobId, job.id))
+    .orderBy(asc(chatMessages.createdAt));
+
+  const view: JobChatView = {
+    messages: rows.map((r) => ({
+      id: r.id,
+      senderRole: r.senderRole,
+      type: r.type,
+      body: r.body,
+      lat: r.lat,
+      lng: r.lng,
+      createdAt: r.createdAt,
+    })),
+    canSend: CHAT_ACTIVE_STATUSES.has(job.status),
+  };
+  res.json(view);
 });
 
 // ── Hirer draft saves ─────────────────────────────────────────────────────────
