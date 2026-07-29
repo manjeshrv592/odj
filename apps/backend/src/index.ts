@@ -2,6 +2,7 @@ import { createApp } from "./app";
 import { env } from "./env";
 import { pool } from "./db";
 import { seedRootAdmin } from "./db/seed-root";
+import { attachChatServer } from "./lib/chat-ws";
 
 /** Process entry point: start the HTTP server and handle graceful shutdown. */
 const app = createApp();
@@ -14,7 +15,10 @@ const server = app.listen(env.PORT, () => {
   console.log(`[odj-backend]   liveness:  GET /api/health`);
   console.log(`[odj-backend]   readiness: GET /api/health/db`);
   console.log(`[odj-backend]   auth:      ALL /api/auth/*`);
+  console.log(`[odj-backend]   chat:      WS   /ws/chat`);
 });
+
+attachChatServer(server);
 
 async function shutdown(signal: string) {
   console.log(`\n[odj-backend] ${signal} received, shutting down...`);

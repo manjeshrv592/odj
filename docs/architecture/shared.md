@@ -143,10 +143,53 @@ packages/shared/
     `WorkerJobView` (worker's active job — `{ id, status, professionName, hirer:{name,
     lat,lng}, startRequested }`). `verifyOtpSchema` `{ code }` (4 digits).
   - `jobListFilterSchema` (`active|completed|cancelled`), `jobListItemSchema` /
-    `JobListItem` (`{ id, status, professionName, counterpartName, createdAt }`) +
-    `jobsListViewSchema` (worker/hirer Jobs tabs).
+    `JobListItem` (`{ id, status, professionName, counterpartName,
+    counterpartProfileId?, createdAt, ratedByMe }`) + `jobsListViewSchema`
+    (worker/hirer Jobs tabs). `counterpartProfileId` is null when no worker ever
+    matched (cancelled/expired/no_workers); links a Jobs-tab row to the
+    counterpart's profile-view screen.
   - `notificationTypeSchema` extended with `job_offer` / `job_matched` / `job_started` /
-    `job_completed` / `job_cancelled`.
+    `job_completed` / `job_cancelled` / `job_rated`.
+  - `jobViewSchema.matchedWorker` and `workerJobViewSchema.hirer` each carry an
+    `id` (profile id) — links to the worker/hirer profile-view screens (§8).
+  - `workerProfileSchema` / `hirerProfileSchema` extended with `avgRating`,
+    `ratingCount`.
+- **Ratings (§8):**
+  - `ratingDirectionSchema` / `RatingDirection` — `worker_to_hirer |
+    hirer_to_worker` (resolved server-side from job ownership, never
+    client-supplied).
+  - `submitRatingSchema` / `SubmitRating` — `{ stars: 1-5, comment?: ≤500 chars }`
+    (`POST /jobs/:id/rating`).
+  - `ratingSchema` / `Rating` — `{ stars, comment?, createdAt }`, a previously
+    submitted (immutable) rating.
+  - `jobRatingViewSchema` / `JobRatingView` — `GET /jobs/:id/rating` shape:
+    `{ job: {id, professionName, counterpartName, status}, canRate, myRating? }`.
+  - `workerProfileViewSchema` / `WorkerProfileView` — narrow public profile a
+    hirer sees for a matched worker (`GET /hirer/worker/:workerProfileId`):
+    `{ id, firstName?, lastName?, photoUrl?, city?, state?, professions,
+    avgRating?, ratingCount }`. Deliberately not `workerProfileSchema` (no
+    onboarding-internal fields).
+  - `hirerProfileViewSchema` / `HirerProfileView` — symmetric, narrower still
+    (no business/org fields) (`GET /worker/hirer/:hirerProfileId`).
+- **Chat (§7):**
+  - `chatSenderRoleSchema` / `ChatSenderRole` — `worker | hirer`, resolved
+    server-side from job ownership, never client-supplied.
+  - `chatMessageTypeSchema` / `ChatMessageType` — `text | location` (no
+    files/images).
+  - `chatMessageSchema` / `ChatMessage` — `{ id, senderRole, type, body?,
+    lat?, lng?, createdAt }`.
+  - `jobChatViewSchema` / `JobChatView` — `GET /jobs/:id/chat` shape:
+    `{ messages: ChatMessage[], canSend }`.
+  - `sendChatMessageSchema` / `SendChatMessage` — discriminated union on
+    `type`: `{type:"text", body: 1-1000 chars}` | `{type:"location", lat, lng}`
+    — the payload of a `{type:"send"}` WS frame.
+  - `chatWsClientFrameSchema` / `ChatWsClientFrame` — discriminated union of
+    the three client→server `/ws/chat` frame shapes (`{type:"join", jobId}` /
+    `{type:"send", message}` / `{type:"typing"}`), shared so backend and
+    mobile type the wire protocol identically. Server→client frames
+    (`joined`/`message`/`ended`/`presence`/`typing`/`error`) aren't zod-shared
+    — typed ad-hoc on each side (`ChatWsMessage` in `use-chat.ts`).
+  - `notificationTypeSchema` extended with `chat_message`.
 
 > Grows as features land. Prefer generating DB-owned shapes via `drizzle-zod`
 > (in backend) and re-exporting refined schemas here.

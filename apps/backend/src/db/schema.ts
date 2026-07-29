@@ -201,6 +201,10 @@ export const workerProfiles = pgTable("worker_profiles", {
   // Uber-style presence: a worker only receives job offers while `is_online`.
   isOnline: boolean("is_online").notNull().default(false),
   lastOnlineAt: timestamp("last_online_at"),
+  // Denormalized rating aggregate (§8), kept in sync transactionally whenever a
+  // hirer rates this worker for a completed job — see `ratings` below.
+  avgRating: doublePrecision("avg_rating"),
+  ratingCount: integer("rating_count").notNull().default(0),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
@@ -298,6 +302,10 @@ export const hirerProfiles = pgTable("hirer_profiles", {
   orgType: orgType("org_type"),
   gstRegistered: boolean("gst_registered").notNull().default(false),
   gstin: text("gstin"),
+  // Denormalized rating aggregate (§8), kept in sync transactionally whenever a
+  // worker rates this hirer for a completed job — see `ratings` below.
+  avgRating: doublePrecision("avg_rating"),
+  ratingCount: integer("rating_count").notNull().default(0),
   status: profileStatus("status").notNull().default("draft"),
   currentStep: integer("current_step").notNull().default(0),
   submittedAt: timestamp("submitted_at"),
@@ -439,4 +447,66 @@ export const jobOffers = pgTable(
     uniqueIndex("job_offers_job_worker_uniq").on(t.jobId, t.workerProfileId),
     index("job_offers_worker_status_idx").on(t.workerProfileId, t.status),
   ],
+);
+
+// ── Ratings (§8) ──────────────────────────────────────────────────────────────
+/** Which party is rating whom for a job — resolved from the job's own FKs. */
+export const ratingDirection = pgEnum("rating_direction", [
+  "worker_to_hirer",
+  "hirer_to_worker",
+]);
+
+/**
+ * A single star (+ optional comment) rating, one per (job, direction) — at most
+ * two rows per completed job (worker→hirer and hirer→worker). Eligibility is
+ * job-history-based (job must be `completed`), not gated on current profile
+ * approval status. Submitting a rating also updates the ratee's denormalized
+ * `avgRating`/`ratingCount` on `workerProfiles`/`hirerProfiles` in the same
+ * transaction.
+ */
+export const ratings = pgTable(
+  "ratings",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    jobId: uuid("job_id")
+      .notNull()
+      .references(() => jobs.id, { onDelete: "cascade" }),
+    direction: ratingDirection("direction").notNull(),
+    stars: integer("stars").notNull(),
+    comment: text("comment"),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("ratings_job_direction_uniq").on(t.jobId, t.direction),
+    index("ratings_job_idx").on(t.jobId),
+  ],
+);
+
+// ── Chat (§7) ─────────────────────────────────────────────────────────────────
+/** Which party sent a chat message — resolved from the job's own FKs, never client-supplied. */
+export const chatSenderRole = pgEnum("chat_sender_role", ["worker", "hirer"]);
+
+/** A chat message is either free text or a one-off shared location. */
+export const chatMessageType = pgEnum("chat_message_type", ["text", "location"]);
+
+/**
+ * Worker↔hirer chat, scoped to one job. Live (via WebSocket) only while the
+ * job is `matched`/`in_progress`; read-only after `completed`/`cancelled`.
+ * `body` is set for `type: "text"`, `lat`/`lng` for `type: "location"`.
+ */
+export const chatMessages = pgTable(
+  "chat_messages",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    jobId: uuid("job_id")
+      .notNull()
+      .references(() => jobs.id, { onDelete: "cascade" }),
+    senderRole: chatSenderRole("sender_role").notNull(),
+    type: chatMessageType("type").notNull(),
+    body: text("body"),
+    lat: doublePrecision("lat"),
+    lng: doublePrecision("lng"),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+  },
+  (t) => [index("chat_messages_job_created_idx").on(t.jobId, t.createdAt)],
 );

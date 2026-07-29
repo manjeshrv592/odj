@@ -18,6 +18,17 @@ export default function WorkerJobs() {
           keyBase="worker"
           fetcher={appApi.workerJobs}
           onOpenActive={() => router.push("/job" as Href)}
+          onRate={(item) =>
+            router.push(`/(worker)/rate-job?jobId=${item.id}` as Href)
+          }
+          onViewProfile={(item) =>
+            router.push(
+              `/(worker)/hirer-profile?id=${item.counterpartProfileId}` as Href,
+            )
+          }
+          onOpenChat={(item) =>
+            router.push(`/(worker)/chat?jobId=${item.id}` as Href)
+          }
         />
       </ScrollView>
     </SafeAreaView>

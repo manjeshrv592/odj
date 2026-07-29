@@ -33,21 +33,27 @@ apps/mobile/
     │   ├── _layout.tsx    # root Stack + <SessionGate> (auth/onboarding routing)
     │   ├── index.tsx      # root spinner — SessionGate redirects approved users to their tab home
     │   ├── (hirer)/       # approved-hirer tabs: Home / Jobs / Profile
-    │   │   ├── _layout.tsx     # Tabs (Home/Jobs/Profile; professions+search are href:null)
+    │   │   ├── _layout.tsx     # Tabs (Home/Jobs/Profile; professions/search/rate-job/worker-profile href:null)
     │   │   ├── index.tsx       # Home tab: active-job banner + pick a category
     │   │   ├── jobs.tsx        # Jobs tab: Active/Completed/Cancelled (<JobList>)
-    │   │   ├── profile.tsx     # Profile tab: notifications + theme + sign out
+    │   │   ├── profile.tsx     # Profile tab: own rating + notifications + theme + sign out
     │   │   ├── professions.tsx # pick a profession → POST /jobs → search (push-only)
-    │   │   └── search.tsx      # live "searching…" → matched (start OTP) → in_progress (end OTP)
+    │   │   ├── search.tsx      # live "searching…" → matched (start OTP) → in_progress (end OTP) → auto-navigates to rate-job on completion
+    │   │   ├── rate-job.tsx    # rate the matched worker for a completed job (?jobId)
+    │   │   ├── worker-profile.tsx # a matched worker's public profile + rating (?id)
+    │   │   └── chat.tsx        # live/read-only chat with the matched worker (?jobId)
     │   ├── (worker)/      # approved-worker tabs: Home / Jobs / Profile
-    │   │   ├── _layout.tsx     # Tabs (Home/Jobs/Profile; rates/availability/location/job href:null)
+    │   │   ├── _layout.tsx     # Tabs (Home/Jobs/Profile; rates/availability/location/job/rate-job/hirer-profile/chat href:null)
     │   │   ├── home.tsx        # Home tab: Go-online toggle, offers, active-job card
     │   │   ├── jobs.tsx        # Jobs tab: Active/Completed/Cancelled (<JobList>)
-    │   │   ├── profile.tsx     # Profile tab: setup links (rates/availability/location) + notifications + account
+    │   │   ├── profile.tsx     # Profile tab: own rating + setup links (rates/availability/location) + notifications + account
     │   │   ├── rates.tsx       # set ₹ rates per profession (slider + input, bounds-validated)
     │   │   ├── availability.tsx# month calendar — mark days off (all / per profession)
     │   │   ├── location.tsx    # high-accuracy precise location capture
-    │   │   └── job.tsx         # active job: map to hirer, Start-work gate, verify start/end OTP
+    │   │   ├── job.tsx         # active job: map to hirer, Start-work gate, verify start/end OTP → auto-navigates to rate-job on completion
+    │   │   ├── rate-job.tsx    # rate the hirer for a completed job (?jobId)
+    │   │   ├── hirer-profile.tsx # a worked-for hirer's public profile + rating (?id)
+    │   │   └── chat.tsx        # live/read-only chat with the hirer (?jobId)
     │   ├── (auth)/        # auth screens group
     │   │   ├── login.tsx    # Email/Phone choice (phone stubbed) → send OTP
     │   │   ├── otp.tsx      # enter OTP → signIn.emailOtp
@@ -65,9 +71,11 @@ apps/mobile/
     │   ├── theme-toggle.tsx # light/dark toggle (Pressable)
     │   ├── health-status.tsx # backend health card (TanStack Query)
     │   ├── notifications-list.tsx # in-app notifications list (tap → mark read)
+    │   ├── rate-job-screen.tsx # shared rate-job UI (stars + comment), used by both (worker)/rate-job and (hirer)/rate-job
+    │   ├── chat-screen.tsx # shared chat UI (bubbles, location pins, composer), used by both (worker)/chat and (hirer)/chat
     │   ├── onboarding/    # wizard layout + field components (image/location/req)
     │   └── ui/            # rnr primitives: text, button, input, otp-input,
-    │                      #   card, label, field, select, chips, switch, progress-header
+    │                      #   card, label, field, select, chips, switch, progress-header, star-rating
     └── lib/
         ├── utils.ts       # cn()
         ├── api.ts         # API_URL + apiFetch() (public endpoints)
@@ -76,6 +84,8 @@ apps/mobile/
         ├── use-worker.ts  # useWorkerRates/DaysOff/Offers/Job() (worker queries + active job poll)
         ├── use-hirer.ts   # useJob() — polls a hiring job through its live lifecycle
         ├── use-notifications.ts # useNotifications() query (GET /api/app/notifications)
+        ├── use-push.ts    # usePushRegistration() + useNotificationTapRouting() (Expo push token + tap deep-linking)
+        ├── use-chat.ts    # useChat(jobId) — /ws/chat WebSocket connection + reconnect/backfill, layered on the chat history query cache
         ├── uploadcare.ts  # uploadToUploadcare() — expo-image-picker → Uploadcare CDN
         ├── storage.ts     # cross-platform storage (SecureStore native / localStorage web)
         └── auth-client.ts # better-auth expo client (+ inferAdditionalFields)
@@ -95,8 +105,8 @@ apps/mobile/
   (`(worker)/home` or `(hirer)`). Only redirects on *arrival* (auth/onboarding groups
   or the root `/`), so in-app tab navigation isn't bounced. Routing is driven by the
   profile `status`, not the legacy `onboardingCompleted`/`setupCompletedAt` flags.
-  Spinner while session + state load. (Push registration is deferred — see the note
-  under `use-notifications.ts`.)
+  Spinner while session + state load. Also calls `usePushRegistration()` +
+  `useNotificationTapRouting(state?.userType)` (see `lib/use-push.ts`).
 
 ## src/app/index.tsx
 - `HomeScreen` — a transient spinner at `/`. `SessionGate` redirects approved users
@@ -105,34 +115,61 @@ apps/mobile/
 
 ## src/app/(worker)/
 - `_layout.tsx` — `Tabs` (Home / Jobs / Profile; emoji tab icons themed via
-  `useTheme`). rates/availability/location/job are `href:null` (push-only).
+  `useTheme`). rates/availability/location/job/rate-job/hirer-profile/chat are
+  `href:null` (push-only).
 - `home.tsx` — `WorkerHome` (Home tab): **"Go online"** `Switch` (`appApi.setOnline`,
   seeded from `worker.isOnline`); while online, an "Incoming requests" section polls
   `useWorkerOffers` (3s) with Accept/Decline (accept → `/(worker)/job`). An
   **active-job card** (`useWorkerJob`) links to it.
 - `jobs.tsx` — `WorkerJobs` (Jobs tab): `<JobList keyBase="worker">` (Active/Completed/
-  Cancelled); active rows → `/job`.
-- `profile.tsx` — `WorkerProfile` (Profile tab): setup links (rates/availability/
+  Cancelled); active rows → `/job`; not-yet-rated completed rows → `rate-job?jobId`;
+  the counterpart (hirer) name on any row → `hirer-profile?id`; a 💬 tap target on any
+  row with a `counterpartProfileId` → `chat?jobId` (live if active, read-only history
+  after end).
+- `profile.tsx` — `WorkerProfile` (Profile tab): own rating (`<StarRating>` read-only
+  + avg/count, from `worker.avgRating/ratingCount`) + setup links (rates/availability/
   location, each with a ✓ when done) + `<NotificationsList>` + theme + sign out.
-- `job.tsx` — `WorkerJobScreen` (`useWorkerJob`, 3s poll). `<Map>` to the hirer; by
-  status: `matched` + !`startRequested` → **"Start work"** (`appApi.requestStart`);
-  then enter the start OTP (`OtpInput` → `verifyStart`); `in_progress` → end OTP →
-  `verifyEnd`; local "Job complete ✅" on end; Cancel (`cancelWorkerJob`).
+- `job.tsx` — `WorkerJobScreen` (`useWorkerJob`, 3s poll). `<Map>` to the hirer; a
+  **💬 Chat** button next to the header → `chat?jobId`; the
+  hirer name/profession line is a `Pressable` → `hirer-profile?id`. By status:
+  `matched` + !`startRequested` → **"Start work"** (`appApi.requestStart`); then enter
+  the start OTP (`OtpInput` → `verifyStart`); `in_progress` → end OTP → `verifyEnd`,
+  which on success `router.replace`s straight to `rate-job?jobId` (no intermediate
+  "Done" tap); Cancel (`cancelWorkerJob`).
+- `rate-job.tsx` — thin wrapper: `<RateJobScreen jobId backHref="/home"
+  jobsKeyBase="worker">`.
+- `hirer-profile.tsx` — `HirerProfileView` (`?id`): `appApi.hirerProfileView(id)` —
+  name, city, read-only `<StarRating>` + avg/count for a hirer this worker has
+  actually worked for (backend 404s otherwise).
+- `chat.tsx` — thin wrapper: `<ChatScreen jobId myRole="worker">`.
 
 ## src/app/(hirer)/
-- `_layout.tsx` — `Tabs` (Home / Jobs / Profile; professions+search are `href:null`).
+- `_layout.tsx` — `Tabs` (Home / Jobs / Profile; professions/search/rate-job/
+  worker-profile/chat are `href:null`).
 - `index.tsx` — `HirerBrowse` (Home tab): an **active-job banner** (poll
   `appApi.hirerJobs("active")`) → resume `search`, plus the category list (reuse
   `appApi.categories`) → tap → professions.
 - `jobs.tsx` — `HirerJobs` (Jobs tab): `<JobList keyBase="hirer">`; active rows →
-  `search?jobId`.
-- `profile.tsx` — `HirerProfile` (Profile tab): `<NotificationsList>` + theme + sign out.
+  `search?jobId`; not-yet-rated completed rows → `rate-job?jobId`; the counterpart
+  (worker) name on any row → `worker-profile?id`; a 💬 tap target on any row with a
+  `counterpartProfileId` → `chat?jobId` (live if active, read-only history after end).
+- `profile.tsx` — `HirerProfile` (Profile tab): own rating (`<StarRating>` read-only
+  + avg/count, from `hirer.avgRating/ratingCount`) + `<NotificationsList>` + theme +
+  sign out.
 - `professions.tsx` — `HirerProfessions` (`?categoryId`): professions in the category;
   tapping one `appApi.createJob({ professionId, hirer lat/lng })` → search.
 - `search.tsx` — `HirerSearch` (`?jobId`): `<Map>` centered on the hirer; `useJob`
-  polls every 2s through the lifecycle — "searching…" → matched (worker pin + the
-  **start code to show** `otpToShow`) → in_progress (**end code to show**) →
-  completed / cancelled, plus "no workers"/"expired". Cancel → `appApi.cancelJob`.
+  polls every 2s through the lifecycle — "searching…" → matched (worker pin, tap to
+  `worker-profile?id`, a **💬 Chat** button → `chat?jobId`, + the **start code to
+  show** `otpToShow`) → in_progress (**end code to show**) → completed (an effect
+  `router.replace`s to `rate-job?jobId` the instant `status` flips, guarded by a ref
+  so it fires once) / cancelled, plus "no workers"/"expired". Cancel → `appApi.cancelJob`.
+- `rate-job.tsx` — thin wrapper: `<RateJobScreen jobId backHref="/(hirer)"
+  jobsKeyBase="hirer">`.
+- `worker-profile.tsx` — `WorkerProfileView` (`?id`): `appApi.workerProfileView(id)` —
+  photo, name, city, professions, read-only `<StarRating>` + avg/count for a worker
+  this hirer has actually matched with (backend 404s otherwise).
+- `chat.tsx` — thin wrapper: `<ChatScreen jobId myRole="hirer">`.
 - `rates.tsx` — `WorkerRatesScreen`: `useWorkerRates()`; per profession renders only
   admin-enabled units (₹ daily/hourly) as a `@react-native-community/slider` bounded
   to [min,max] synced with a number `Input` + client validation; Save →
@@ -205,6 +242,33 @@ apps/mobile/
 - `chips.tsx` — `Chips`: multi-select chip group (worker languages + professions).
 - `switch.tsx` — `Switch`: themed RN `Switch` (hirer GST toggle).
 - `progress-header.tsx` — `ProgressHeader`: "Step n of N" + progress bar + Back.
+- `star-rating.tsx` — `StarRating`: 1-5 tap `★`/`☆` input (`OtpInput`'s rating
+  counterpart, plain text glyphs — no icon lib); read-only when `onChange` is
+  omitted (used to display an existing rating or an aggregate).
+
+## src/components/rate-job-screen.tsx
+- `RateJobScreen({ jobId, backHref, jobsKeyBase })` — shared by
+  `(worker)/rate-job` and `(hirer)/rate-job`. `useQuery(JOB_RATING_KEY(jobId))` →
+  `appApi.jobRating`; if already rated, read-only `<StarRating>` + comment; else
+  a `<StarRating>` + optional comment `Field`/`Input` + submit `Button` →
+  `useMutation(appApi.submitRating)` → invalidates the rating key + `[jobsKeyBase,
+  "jobs"]` (flips the Jobs-tab "Rate →" to "Rated ✓") → `router.replace(backHref)`.
+
+## src/components/chat-screen.tsx (§7)
+- `ChatScreen({ jobId, myRole })` — shared by `(worker)/chat` and `(hirer)/chat`.
+  A header (back chevron + "🟢 Online"/"typing…"/"Offline" from
+  `useChat`'s `otherOnline`/`otherTyping`, measured via `onLayout` for the
+  keyboard offset below) sits above the message list: bubbles (right-aligned
+  when `senderRole === myRole`), location messages render as a small `<Map>`
+  pin; a composer (text `Input` — `onChangeText` also calls `notifyTyping()`
+  — + send `Button` + a "📍" share-location button using `expo-location`)
+  shown only while `canSend`, replaced by a "This job has ended — chat is
+  read-only" note otherwise. `KeyboardAvoidingView behavior="padding"` on
+  **both** platforms with an explicit `keyboardVerticalOffset` (header height
+  + top safe-area inset) — Android's native `windowSoftInputMode="adjustResize"`
+  doesn't auto-resize under edge-to-edge (default since Expo SDK 53), so the
+  offset has to be computed in JS rather than relying on the manifest setting.
+  Auto-scroll-to-end on new content.
 
 ## src/components/providers.tsx
 - `Providers` — `QueryClientProvider` + `ThemeProvider` (Context).
@@ -232,14 +296,19 @@ apps/mobile/
   `categories`, `professions`, `effectiveRequirements`, `saveWorker`,
   `saveWorkerProfessions`, `submitWorker`, `saveHirer`, `submitHirer`, plus
   notifications: `notifications`, `markNotificationRead`, `markAllNotificationsRead`,
-  and the approved-worker calls: `workerRates`, `saveWorkerRates`, `workerDaysOff`,
-  `toggleDayOff`, `saveWorkerLocation`, `markAvailabilityReviewed`, `completeSetup`,
-  the matching calls: `setOnline`, `workerOffers`, `acceptOffer`, `declineOffer`,
-  `createJob`, `job`, `cancelJob`, the job-lifecycle calls: `workerJob`, `requestStart`,
-  `verifyStart`, `verifyEnd`, `cancelWorkerJob`, and the job lists: `workerJobs(filter)`
-  / `hirerJobs(filter)` (+ `WORKER_OFFERS_KEY` / `WORKER_JOB_KEY` / `JOB_KEY`).
+  `registerPushToken`, and the approved-worker calls: `workerRates`, `saveWorkerRates`,
+  `workerDaysOff`, `toggleDayOff`, `saveWorkerLocation`, `markAvailabilityReviewed`,
+  `completeSetup`, the matching calls: `setOnline`, `workerOffers`, `acceptOffer`,
+  `declineOffer`, `createJob`, `job`, `cancelJob`, the job-lifecycle calls: `workerJob`,
+  `requestStart`, `verifyStart`, `verifyEnd`, `cancelWorkerJob`, the job lists:
+  `workerJobs(filter)` / `hirerJobs(filter)`, the ratings calls (§8): `jobRating`,
+  `submitRating`, `workerProfileView`, `hirerProfileView`, and `chatHistory(jobId)`
+  (§7 — history + read-only fallback; live send/receive is the WS connection in
+  `lib/use-chat.ts`, not a REST call).
 - `ONBOARDING_STATE_KEY` / `NOTIFICATIONS_KEY` / `WORKER_RATES_KEY` /
-  `WORKER_DAYS_OFF_KEY` — TanStack Query keys.
+  `WORKER_DAYS_OFF_KEY` / `WORKER_OFFERS_KEY` / `WORKER_JOB_KEY` / `JOB_KEY` /
+  `JOB_RATING_KEY(jobId)` / `WORKER_PROFILE_VIEW_KEY(id)` /
+  `HIRER_PROFILE_VIEW_KEY(id)` / `CHAT_KEY(jobId)` — TanStack Query keys.
 
 ## src/lib/use-worker.ts
 - `useWorkerRates()` — `useQuery` over `appApi.workerRates` (the worker's
@@ -255,11 +324,44 @@ apps/mobile/
 - `useNotifications()` — `useQuery` over `appApi.notifications` (enabled once a
   session exists, polls every 30s). Read by `<NotificationsList>`.
 
-> **Push deferred:** mobile push (Expo `getExpoPushTokenAsync`) was removed because
-> it can't run in Expo Go (SDK 53+) and needs an EAS dev build + projectId. The
-> backend push seam stays dormant (`push_tokens` table + `POST /api/app/push-tokens`
-> + `sendExpoPush`); re-enable by re-adding `expo-notifications` + a `lib/push.ts`
-> that registers the token, once a dev build exists.
+## src/lib/use-push.ts
+- `usePushRegistration()` — best-effort: requests notification permission, gets
+  this device's Expo push token (`getExpoPushTokenAsync`, needs an EAS dev
+  build — Expo Go dropped remote push in SDK 53) and registers it via
+  `appApi.registerPushToken`; retries on the next mount if it fails.
+- `useNotificationTapRouting(userType)` — routes a tapped push notification to
+  the right screen: listens via
+  `Notifications.addNotificationResponseReceivedListener`, plus checks
+  `getLastNotificationResponseAsync()` on mount for the cold-start case (app
+  launched by tapping a notification while killed). `routeForNotification`
+  keys off `data.type` (every push's `data` carries `type`, merged in by
+  `pushUser` on the backend — see `lib/notifications.ts`) — `job_completed`
+  routes the hirer to `/(hirer)/rate-job?jobId=`, `chat_message` routes either
+  role to their `chat?jobId=` screen; written to extend as more job events get
+  a tap destination.
+
+## src/lib/use-chat.ts (§7)
+- `useChat(jobId)` — live chat for one job over `/ws/chat`. History comes from
+  `appApi.chatHistory` via TanStack Query (`CHAT_KEY(jobId)`); a `WebSocket`
+  layered on top authenticates the handshake with the session cookie
+  (`authClient.getCookie()`, passed as an `options.headers.Cookie` — React
+  Native's `WebSocket` extends the standard constructor with a third
+  `options` argument the DOM lib types don't know about, hence the
+  `RNWebSocketCtor` cast) and sends `{type:"join", jobId}` on open. Incoming
+  `{type:"message"}` frames push straight into the query cache
+  (`qc.setQueryData`); `{type:"joined"}` invalidates the cache once to
+  backfill any gap since the last fetch (covers reconnects) and seeds
+  `otherOnline` from the response; `{type:"ended"}` flips local `canSend` to
+  `false`; `{type:"presence", online}` updates `otherOnline`; `{type:"typing"}`
+  flips `otherTyping` true for 3s (cleared early if a `message` frame arrives
+  first). `notifyTyping()` sends a `{type:"typing"}` frame, throttled to at
+  most once per 2s while the user keeps typing. Reconnects with capped
+  exponential backoff (1s→2s→4s→8s→15s) on close/error while the screen is
+  mounted — on our own disconnect `otherOnline`/`otherTyping` reset to
+  `false` since we can't know the other party's state until the next
+  `{type:"joined"}` refreshes it; connects on mount, closes on unmount — no
+  global always-on socket. Returns `{ messages, isLoading, canSend, connected,
+  otherOnline, otherTyping, sendText, sendLocation, notifyTyping }`.
 
 ## src/components/notifications-list.tsx
 - `NotificationsList` — renders `useNotifications()`; unread rows highlighted
@@ -271,7 +373,13 @@ apps/mobile/
 - `JobList` — the Active/Completed/Cancelled list shared by the worker + hirer Jobs
   tabs: a `<Segmented>` filter + rows (profession + counterpart + date + status);
   `fetcher(filter)` supplies the role's jobs; `onOpenActive` makes active rows resume
-  the live job. Active filter polls every 5s.
+  the live job; `onRate` makes completed rows with `!ratedByMe` show a "Rate →"
+  affordance (rated rows show "Rated ✓" instead); `onViewProfile` makes the
+  counterpart's name (any row with a `counterpartProfileId`) its own tap target,
+  independent of the row-level action, opening the profile-view screen;
+  `onOpenChat` (§7) adds a 💬 tap target (same `counterpartProfileId` gate) that
+  opens that job's chat — live if active, read-only history once it's ended.
+  Active filter polls every 5s.
 
 ## src/components/ui/segmented.tsx
 - `Segmented<T>` — iOS-style segmented control (row of pill options, one selected).

@@ -26,7 +26,9 @@ apps/backend/
     │   ├── email.ts    # Resend HTML emails: OTP + admin invite + verification decisions
     │   ├── push.ts     # Expo Push API sender (no dep; best-effort)
     │   ├── notifications.ts # in-app notification + push fan-out helpers
-    │   └── requirements.ts  # cascading effective requirement fields (shared helper)
+    │   ├── requirements.ts  # cascading effective requirement fields (shared helper)
+    │   ├── chat-hub.ts # in-memory chat room registry (join/leave/broadcast/endRoom)
+    │   └── chat-ws.ts  # attachChatServer() — the /ws/chat WebSocket server + resolveChatParty
     ├── middleware/
     │   ├── require-admin.ts # admin-only guard (better-auth session + adminRole)
     │   └── require-user.ts  # mobile (worker/hirer) guard — session, rejects admins
@@ -40,8 +42,9 @@ apps/backend/
 
 ## src/index.ts
 - Entry point. Builds the app via `createApp()`, fires `seedRootAdmin()` (non-blocking,
-  idempotent), listens on `env.PORT`, logs the routes, and handles `SIGINT`/`SIGTERM`
-  graceful shutdown (closes server + pg pool).
+  idempotent), listens on `env.PORT`, logs the routes, calls `attachChatServer(server)`
+  (§7 chat's `/ws/chat` WebSocket server — see `lib/chat-ws.ts`), and handles
+  `SIGINT`/`SIGTERM` graceful shutdown (closes server + pg pool).
 
 ## src/app.ts
 - `createApp(): Express` — constructs the app:
@@ -155,7 +158,31 @@ apps/backend/
     `notifyHirer(hirerProfileId, …)` helper (push-only).
   - **Job lists:** `GET /worker/jobs?filter=active|completed|cancelled` +
     `GET /hirer/jobs?filter=…` → `jobsListView` rows (profession + counterpart name +
-    date + status; role-specific status buckets, newest first).
+    date + status; role-specific status buckets, newest first; completed rows also
+    carry `ratedByMe`, via a left-join on `ratings` filtered to the caller's own
+    `direction`; every row carries `counterpartProfileId` — the joined
+    `hirerProfiles.id`/`workerProfiles.id` — null on the hirer side when no
+    worker ever matched).
+  - **Ratings (§8):** `resolveRatingParty(job, userId)` — job-history-based (not
+    gated on current profile approval), resolves the caller's `direction`
+    (`worker_to_hirer` | `hirer_to_worker`) + the ratee's profile id from the
+    job's own FKs. `GET /jobs/:id/rating` → `JobRatingView` (`canRate`,
+    `myRating`). `POST /jobs/:id/rating` — one-shot (409 on a duplicate
+    `(jobId, direction)`, enforced by `ratings`' unique index), only while
+    `status === "completed"`; in the same transaction, row-locks
+    (`.for("update")`) and updates the ratee's denormalized `avgRating`/
+    `ratingCount`, then pushes them `job_rated` ("You've been rated").
+    `GET /hirer/worker/:workerProfileId` / `GET /worker/hirer/:hirerProfileId` —
+    narrow public profile + rating for a party the caller has an actual `jobs`
+    link to (404 otherwise — not a general browse-any-profile endpoint).
+    `notifyWorker(workerProfileId, …)` helper, symmetric with `notifyHirer`.
+  - **Chat (§7):** `GET /jobs/:id/chat` → `JobChatView` (`messages`,
+    `canSend`) — history + the read-only fallback once a job ends; auth via
+    `resolveChatParty` (see `lib/chat-ws.ts`). Live send/receive happens over
+    `/ws/chat`, not REST — see `lib/chat-hub.ts` / `lib/chat-ws.ts`. The three
+    job-ending endpoints above (`verify-end`, worker `job/:id/cancel`, hirer
+    `jobs/:id/cancel`) each call `endChatRoom(job.id)` right after flipping
+    status, so open chat screens are told to stop accepting input immediately.
   - **Notifications:** job events use `pushUser` (push-only, no persistent row);
     account notices (verification decisions) keep `notifyUser` (push + in-app row).
 
@@ -240,9 +267,57 @@ apps/backend/
 ## src/lib/notifications.ts
 - `createNotification(userId, input)` — persist one in-app `notifications` row.
 - `pushUser(userId, input)` — **push only** (no row), for transient job events shown by
-  live screens + the job lists (keeps the notifications list uncluttered).
+  live screens + the job lists (keeps the notifications list uncluttered). The push
+  payload's `data` always includes `type` (merged in from `input.type`, not just
+  `input.data`) so the client can route a tapped notification without a separate
+  lookup — see mobile's `useNotificationTapRouting`.
 - `notifyUser(userId, input)` — create the row **and** `pushUser`. For account notices
   (verification decisions) that belong in the persistent list. Email is sent separately.
+
+## src/lib/chat-hub.ts (§7)
+- In-memory chat room registry — `Map<jobId, Set<{ws, userId}>>`.
+  Single-process only: correct at the current one-instance deployment; would
+  need a shared pub/sub (e.g. Redis) if the backend is ever horizontally
+  scaled, since a broadcast only reaches sockets on the same process.
+- `join(jobId, ws, userId)` / `leave(jobId, ws)` — room membership.
+- `broadcast(jobId, frame, exclude?)` — JSON-serializes and sends to every
+  open socket in the room; `exclude` (the sender) skips one socket — used for
+  presence/typing frames, which are inherently "about the other party" so the
+  sender never needs its own echo.
+- `isUserConnected(jobId, userId)` — used by `chat-ws.ts` to skip a "new
+  message" push when the recipient is already looking at the open chat.
+- `endRoom(jobId)` — broadcasts `{type:"ended"}` to everyone still connected
+  when a job reaches a terminal status (called from `app.ts`'s job-ending
+  endpoints). A live nudge only — `send` frames are always re-validated
+  against the job's current DB status in `chat-ws.ts`, not this broadcast.
+
+## src/lib/chat-ws.ts (§7)
+- `resolveChatParty(job, userId)` — job-history-based (like ratings'
+  `resolveRatingParty`): resolves the caller's `senderRole` for a job plus
+  the other party's `userId` (for the push), or `null` if the caller wasn't a
+  party to it. No status gate — read access covers any job the caller was
+  ever part of; exported for reuse by the `GET .../chat` REST endpoint.
+- `CHAT_ACTIVE_STATUSES` — `{"matched", "in_progress"}`, the live-chat window;
+  also exported and reused by the REST endpoint's `canSend`.
+- `attachChatServer(httpServer)` — creates a `ws` `WebSocketServer({
+  noServer: true })` and handles the HTTP `upgrade` event manually: filters
+  to `/ws/chat`, authenticates via the same better-auth session lookup
+  `requireUser` uses (`auth.api.getSession` against the request's `Cookie`
+  header — rejects with a raw `401` before completing the handshake if no
+  session or the user is an admin), then `wss.handleUpgrade`. Per connection:
+  a `{type:"join", jobId}` client frame resolves the party, registers the
+  socket in `chat-hub`, replies `{type:"joined", canSend, otherOnline}`
+  (`otherOnline` from `chatHub.isUserConnected` at join time), and
+  broadcasts `{type:"presence", online:true}` to the rest of the room
+  (excluding the joiner). A `{type:"typing"}` frame rebroadcasts
+  `{type:"typing"}` to the rest of the room (ephemeral — not persisted,
+  client-throttled to ~1/2s). A `{type:"send", message}` frame re-fetches the
+  job's live status (never trusts the joined-time snapshot), inserts into
+  `chat_messages`, broadcasts `{type:"message", message}`, and — only if the
+  other party isn't currently connected to that room — `pushUser`s them a
+  `chat_message` notification. On disconnect, broadcasts
+  `{type:"presence", online:false}` once this was the user's *last* socket in
+  the room (multi-device aware). Ping/pong heartbeat (30s) prunes dead sockets.
 
 ## src/lib/matching.ts
 - `findEligibleWorkers(professionId, lat, lng, radiusKm)` — Haversine SQL selecting
@@ -306,11 +381,29 @@ apps/backend/
   `platform`, timestamps; index on user). Re-register re-points a token at the user.
 - `notifications` — in-app notifications (`user_id` FK cascade, `type`, `title`,
   `body`, optional `data` jsonb, `read`, `created_at`; index on user).
+- `ratingDirection` — pgEnum (`worker_to_hirer` | `hirer_to_worker`). `ratings`
+  (§8) — one row per (job, direction): `job_id` FK cascade, `direction`,
+  `stars` (1-5, validated in zod/route — no DB CHECK, matching the convention
+  elsewhere), optional `comment`, `created_at`; unique `(job_id, direction)` +
+  index on `job_id`. `worker_profiles`/`hirer_profiles` each carry a
+  denormalized `avg_rating` (nullable) + `rating_count` (default 0), updated
+  transactionally when a rating for them is submitted.
+- `worker_profiles.avgRating`/`ratingCount` and `hirer_profiles.avgRating`/
+  `ratingCount` — see `ratings` above.
+- `chatSenderRole` — pgEnum (`worker` | `hirer`). `chatMessageType` — pgEnum
+  (`text` | `location`). `chat_messages` (§7) — one row per message: `job_id`
+  FK cascade, `sender_role` (resolved server-side from job ownership, never
+  client-supplied), `type`, `body` (text messages), `lat`/`lng` (location
+  messages), `created_at`; index on `(job_id, created_at)`. No sender
+  user/profile id column — within one job there are exactly two parties.
 - Migration `0004_*` adds the three enums + `worker_profiles` /
   `worker_professions` / `hirer_profiles` tables. Migration `0005_*` adds the
   verification columns + `push_tokens` / `notifications` tables. Migration `0006_*`
   adds the `professions` price-bound columns, `worker_profiles` location-metadata
-  columns, and the `worker_profession_rates` / `worker_days_off` tables.
+  columns, and the `worker_profession_rates` / `worker_days_off` tables. Migration
+  `0011_*` adds `ratingDirection` + `ratings` and the two profiles' rating
+  aggregate columns. Migration `0012_*` adds `chatSenderRole`/`chatMessageType`
+  + `chat_messages`.
 
 ## src/db/auth-schema.ts
 - better-auth Drizzle tables: `user`, `session`, `account`, `verification`.

@@ -43,16 +43,27 @@ function fmtDate(d: Date): string {
 /**
  * Active / Completed / Cancelled job list, shared by the worker + hirer Jobs tabs.
  * `fetcher` returns the role's jobs for a filter; `onOpenActive` (optional) makes
- * active rows tappable to resume the live job.
+ * active rows tappable to resume the live job; `onRate` (optional) makes
+ * not-yet-rated completed rows tappable to open the rate-job screen; `onViewProfile`
+ * (optional) makes the counterpart's name its own tap target (any row that has a
+ * `counterpartProfileId`) to open their profile-view screen; `onOpenChat`
+ * (optional) adds a 💬 tap target (same `counterpartProfileId` gate) to open
+ * that job's chat — live if active, read-only history once it's ended.
  */
 export function JobList({
   keyBase,
   fetcher,
   onOpenActive,
+  onRate,
+  onViewProfile,
+  onOpenChat,
 }: {
   keyBase: string;
   fetcher: (filter: JobListFilter) => Promise<JobListItem[]>;
   onOpenActive?: (item: JobListItem) => void;
+  onRate?: (item: JobListItem) => void;
+  onViewProfile?: (item: JobListItem) => void;
+  onOpenChat?: (item: JobListItem) => void;
 }) {
   const { data: session } = useSession();
   const [filter, setFilter] = React.useState<JobListFilter>("active");
@@ -77,24 +88,57 @@ export function JobList({
       ) : (
         <View className="gap-2">
           {(jobs ?? []).map((j) => {
-            const tappable = filter === "active" && !!onOpenActive;
+            const canOpenActive = filter === "active" && !!onOpenActive;
+            const canRate = j.status === "completed" && !j.ratedByMe && !!onRate;
+            const canViewProfile = !!j.counterpartProfileId && !!onViewProfile;
+            const canOpenChat = !!j.counterpartProfileId && !!onOpenChat;
+            const tappable = canOpenActive || canRate;
             const Row = (
               <Card className="flex-row items-center gap-3">
                 <View className="flex-1">
                   <Text className="font-poppins-medium text-foreground">
                     {j.professionName}
                   </Text>
+                  {canViewProfile ? (
+                    <Pressable onPress={() => onViewProfile!(j)} hitSlop={4}>
+                      <Text className="text-sm text-primary underline">
+                        {j.counterpartName}
+                      </Text>
+                    </Pressable>
+                  ) : (
+                    <Text className="text-sm text-muted-foreground">
+                      {j.counterpartName}
+                    </Text>
+                  )}
                   <Text className="text-sm text-muted-foreground">
-                    {j.counterpartName} · {fmtDate(j.createdAt)}
+                    {fmtDate(j.createdAt)}
                   </Text>
                 </View>
-                <Text className="text-sm text-muted-foreground">
-                  {statusLabel(j.status)}
-                </Text>
+                <View className="items-end gap-1">
+                  {canOpenChat ? (
+                    <Pressable onPress={() => onOpenChat!(j)} hitSlop={4}>
+                      <Text className="text-lg">💬</Text>
+                    </Pressable>
+                  ) : null}
+                  {canRate ? (
+                    <Text className="text-sm font-poppins-medium text-primary">
+                      Rate →
+                    </Text>
+                  ) : j.status === "completed" && j.ratedByMe ? (
+                    <Text className="text-sm text-muted-foreground">Rated ✓</Text>
+                  ) : (
+                    <Text className="text-sm text-muted-foreground">
+                      {statusLabel(j.status)}
+                    </Text>
+                  )}
+                </View>
               </Card>
             );
             return tappable ? (
-              <Pressable key={j.id} onPress={() => onOpenActive!(j)}>
+              <Pressable
+                key={j.id}
+                onPress={() => (canOpenActive ? onOpenActive!(j) : onRate!(j))}
+              >
                 {Row}
               </Pressable>
             ) : (

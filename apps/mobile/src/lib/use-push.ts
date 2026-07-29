@@ -1,8 +1,9 @@
-import { useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import { Platform } from "react-native";
 import * as Notifications from "expo-notifications";
 import * as Device from "expo-device";
 import Constants from "expo-constants";
+import { useRouter, type Href } from "expo-router";
 import { useSession } from "./auth-client";
 import { appApi } from "./app-api";
 
@@ -63,4 +64,62 @@ export function usePushRegistration(): void {
       done.current = false; // allow a retry on the next mount
     });
   }, [session?.user]);
+}
+
+/**
+ * Where to route a tapped notification. `type` rides along in every push's
+ * `data` (see `notifyUser`/`pushUser` on the backend). Keyed by type so more
+ * job events can route somewhere later — today `job_completed` (prompt the
+ * hirer to rate the worker) and `chat_message` (open that job's chat, for
+ * either role) have a destination.
+ */
+function routeForNotification(
+  data: Record<string, unknown> | undefined,
+  userType: string | null | undefined,
+): Href | null {
+  const jobId = typeof data?.jobId === "string" ? data.jobId : undefined;
+  const type = typeof data?.type === "string" ? data.type : undefined;
+  if (!jobId) return null;
+  if (type === "job_completed" && userType === "hirer") {
+    return `/(hirer)/rate-job?jobId=${jobId}` as Href;
+  }
+  if (type === "chat_message") {
+    return userType === "worker"
+      ? (`/(worker)/chat?jobId=${jobId}` as Href)
+      : userType === "hirer"
+        ? (`/(hirer)/chat?jobId=${jobId}` as Href)
+        : null;
+  }
+  return null;
+}
+
+/**
+ * Route a tapped push notification to the right screen — handles both a tap
+ * while the app is backgrounded and the cold-start case (app launched by
+ * tapping a notification from killed). `userType` decides which role's routes
+ * to target (a push's `data` alone doesn't say who's reading it).
+ */
+export function useNotificationTapRouting(
+  userType: string | null | undefined,
+): void {
+  const router = useRouter();
+
+  const handleResponse = useCallback(
+    (response: Notifications.NotificationResponse) => {
+      const data = response.notification.request.content.data as
+        | Record<string, unknown>
+        | undefined;
+      const href = routeForNotification(data, userType);
+      if (href) router.push(href);
+    },
+    [router, userType],
+  );
+
+  useEffect(() => {
+    Notifications.getLastNotificationResponseAsync().then((response) => {
+      if (response) handleResponse(response);
+    });
+    const sub = Notifications.addNotificationResponseReceivedListener(handleResponse);
+    return () => sub.remove();
+  }, [handleResponse]);
 }

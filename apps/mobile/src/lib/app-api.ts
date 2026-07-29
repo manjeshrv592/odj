@@ -17,6 +17,11 @@ import type {
   WorkerJobView,
   JobListItem,
   JobListFilter,
+  SubmitRating,
+  JobRatingView,
+  WorkerProfileView,
+  HirerProfileView,
+  JobChatView,
 } from "@odj/shared";
 import { API_URL } from "./api";
 import { authClient } from "./auth-client";
@@ -79,6 +84,16 @@ export const WORKER_DAYS_OFF_KEY = ["worker", "days-off"] as const;
 export const WORKER_OFFERS_KEY = ["worker", "offers"] as const;
 export const WORKER_JOB_KEY = ["worker", "job"] as const;
 export const JOB_KEY = (id: string) => ["job", id] as const;
+
+/** TanStack Query keys for ratings (§8) + the worker/hirer profile-view screens. */
+export const JOB_RATING_KEY = (jobId: string) => ["job", jobId, "rating"] as const;
+export const WORKER_PROFILE_VIEW_KEY = (id: string) =>
+  ["worker-profile-view", id] as const;
+export const HIRER_PROFILE_VIEW_KEY = (id: string) =>
+  ["hirer-profile-view", id] as const;
+
+/** TanStack Query key for a job's chat history (§7). */
+export const CHAT_KEY = (jobId: string) => ["job", jobId, "chat"] as const;
 
 /** Typed endpoint functions for the onboarding flow. */
 export const appApi = {
@@ -256,4 +271,26 @@ export const appApi = {
     authedFetch<{ jobs: JobListItem[] }>(
       `/api/app/hirer/jobs?filter=${filter}`,
     ).then((r) => r.jobs),
+
+  // ── Ratings (§8) ─────────────────────────────────────────────────────────────
+  jobRating: (jobId: string) =>
+    authedFetch<JobRatingView>(`/api/app/jobs/${jobId}/rating`),
+
+  submitRating: (jobId: string, input: SubmitRating) =>
+    authedFetch<{ ok: boolean }>(`/api/app/jobs/${jobId}/rating`, {
+      method: "POST",
+      body: JSON.stringify(input),
+    }),
+
+  workerProfileView: (workerProfileId: string) =>
+    authedFetch<WorkerProfileView>(`/api/app/hirer/worker/${workerProfileId}`),
+
+  hirerProfileView: (hirerProfileId: string) =>
+    authedFetch<HirerProfileView>(`/api/app/worker/hirer/${hirerProfileId}`),
+
+  // ── Chat (§7) ────────────────────────────────────────────────────────────────
+  // Sending happens over the WS connection (see lib/use-chat.ts) — this is
+  // history + the read-only fallback once a job has ended.
+  chatHistory: (jobId: string) =>
+    authedFetch<JobChatView>(`/api/app/jobs/${jobId}/chat`),
 };

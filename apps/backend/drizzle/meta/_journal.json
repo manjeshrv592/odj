@@ -78,6 +78,20 @@
       "when": 1785274324305,
       "tag": "0010_lonely_silver_samurai",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1785278065528,
+      "tag": "0011_hesitant_slipstream",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1785282935386,
+      "tag": "0012_robust_rattler",
+      "breakpoints": true
     }
   ]
 }

@@ -37,6 +37,9 @@ export default function HirerLayout() {
       />
       <Tabs.Screen name="professions" options={{ href: null }} />
       <Tabs.Screen name="search" options={{ href: null }} />
+      <Tabs.Screen name="rate-job" options={{ href: null }} />
+      <Tabs.Screen name="worker-profile" options={{ href: null }} />
+      <Tabs.Screen name="chat" options={{ href: null }} />
     </Tabs>
   );
 }

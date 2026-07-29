@@ -1,4 +1,5 @@
-import { View, ActivityIndicator, Alert } from "react-native";
+import * as React from "react";
+import { View, ActivityIndicator, Alert, Pressable } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter, useLocalSearchParams, type Href } from "expo-router";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
@@ -42,6 +43,16 @@ export default function HirerSearch() {
   const status = job?.status;
   const done = () => router.replace("/(hirer)" as Href);
 
+  // Auto-navigate to the rate screen the moment the job flips to completed
+  // (covers the hirer having the app open while the worker verifies the end code).
+  const navigatedToRate = React.useRef(false);
+  React.useEffect(() => {
+    if (status === "completed" && jobId && !navigatedToRate.current) {
+      navigatedToRate.current = true;
+      router.replace(`/(hirer)/rate-job?jobId=${jobId}` as Href);
+    }
+  }, [status, jobId, router]);
+
   return (
     <SafeAreaView className="flex-1 bg-background" edges={["bottom"]}>
       <View className="flex-1">
@@ -60,11 +71,18 @@ export default function HirerSearch() {
           <Card className="gap-3">
             {(status === "matched" || status === "in_progress") && worker ? (
               <>
-                <Text className="text-lg font-poppins-semibold text-foreground">
-                  {status === "in_progress"
-                    ? "🛠️ Job in progress"
-                    : `✅ ${worker.name} matched`}
-                </Text>
+                <Pressable
+                  onPress={() =>
+                    router.push(`/(hirer)/worker-profile?id=${worker.id}` as Href)
+                  }
+                >
+                  <Text className="text-lg font-poppins-semibold text-foreground">
+                    {status === "in_progress"
+                      ? "🛠️ Job in progress"
+                      : `✅ ${worker.name} matched`}
+                  </Text>
+                  <Text className="text-sm text-primary">View profile →</Text>
+                </Pressable>
                 <Text className="text-sm text-muted-foreground">
                   {status === "in_progress"
                     ? "Show your worker this code to complete the job:"
@@ -77,6 +95,12 @@ export default function HirerSearch() {
                     {job.otpToShow}
                   </Text>
                 ) : null}
+                <Button
+                  variant="outline"
+                  onPress={() => router.push(`/(hirer)/chat?jobId=${jobId}` as Href)}
+                >
+                  <Text>💬 Chat</Text>
+                </Button>
                 <Button
                   variant="outline"
                   onPress={() => cancel.mutate()}

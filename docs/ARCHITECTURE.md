@@ -31,13 +31,14 @@ shared conventions; each package file holds its own file/function/component map.
         │  @odj/web     │         │  @odj/mobile  │
         │  (Next.js)    │         │  (Expo)       │
         └──────┬───────┘         └──────┬────────┘
-               │  HTTP (fetch + TanStack Query)   │
+               │  HTTP (fetch + TanStack Query)   │  + WebSocket (§7 chat)
                │  better-auth client              │
                ▼                                  ▼
             ┌────────────────────────────────────────┐
             │            @odj/backend (Express)        │
             │  /api/health      health/readiness       │
             │  /api/auth/*      better-auth (email OTP) │
+            │  /ws/chat         chat WebSocket (§7)    │
             └───────────────┬─────────────────────────┘
                             │ Drizzle ORM (pg)
                             ▼
@@ -82,7 +83,17 @@ the SDK's Blob path and `{uri}` FormData aren't RN-compatible) and `expo-locatio
 (city/state autodetect + the Phase-3 high-accuracy worker location capture). The
 approved-worker availability calendar adds `react-native-calendars` (pure-JS month
 grid; Expo-Go compatible, no native module) and the rates screen adds
-`@react-native-community/slider` (bundled in Expo Go). Mobile push is **deferred** (Expo Go dropped remote push in
-SDK 53; it needs an EAS dev build) — the backend push seam exists (`push_tokens` +
-Expo Push API over HTTPS, no server dep) but the mobile `expo-notifications` client
-is not wired up yet; verification notices reach users via email + in-app.
+`@react-native-community/slider` (bundled in Expo Go). Mobile push is **live** on a
+local EAS dev build (Expo Go dropped remote push in SDK 53) — `expo-notifications`
+registers the device's Expo push token (`lib/use-push.ts` `usePushRegistration`)
+against the backend seam (`push_tokens` + Expo Push API over HTTPS, no server dep),
+and `useNotificationTapRouting` routes a tapped notification to the relevant screen
+(e.g. `job_completed` → the hirer's rate-job screen, §8 Ratings; `chat_message` →
+that job's chat, §7 Chat). Verification notices additionally reach users via
+email + in-app (the persistent notifications list); job events are push-only.
+Backend adds `ws` for §7 Chat's real-time worker↔hirer messaging — a
+`WebSocketServer` attached to the same HTTP server at `/ws/chat`
+(`lib/chat-ws.ts`), authenticated via the existing better-auth session cookie.
+In-memory room registry (`lib/chat-hub.ts`), single-process only — would need
+a shared pub/sub (e.g. Redis) if the backend is ever horizontally scaled. No
+new mobile dependency (React Native ships a global `WebSocket`).

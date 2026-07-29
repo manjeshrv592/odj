@@ -41,6 +41,9 @@ export default function WorkerLayout() {
       <Tabs.Screen name="availability" options={{ href: null }} />
       <Tabs.Screen name="location" options={{ href: null }} />
       <Tabs.Screen name="job" options={{ href: null }} />
+      <Tabs.Screen name="rate-job" options={{ href: null }} />
+      <Tabs.Screen name="hirer-profile" options={{ href: null }} />
+      <Tabs.Screen name="chat" options={{ href: null }} />
     </Tabs>
   );
 }
