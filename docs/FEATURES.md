@@ -102,39 +102,41 @@ sub-items as scope is refined. `[x]` done · `[~]` in progress · `[ ]` not star
       → **Start work** gate before the start OTP. Job events are push-only (the in-app
       notifications list is reserved for account notices).
 
-## 5. Payments — **parked** (2026-07-29)
+## 5. Payments — **up next** (decided 2026-07-29)
 
 - [ ] Collect payment from hirer
 - [ ] Platform fee calculation
 - [ ] Disburse payout to worker
 - [ ] Payment history / receipts
 
-> **Blocked on Route eligibility.** Confirmed 2026-07-29: Razorpay **Route**
-> (the linked-account/split-transfer product the plan below depends on) now
-> requires proof of **>₹40L domestic turnover** (or >₹5L export) in FY25/FY26
-> before it'll be granted — an RBI Payment Aggregator compliance rule effective
-> September 2025. A pre-revenue marketplace like ODJ won't qualify yet, so this
-> section is parked until either turnover clears that bar or we redesign around
-> **manual settlement + RazorpayX Payouts** (Razorpay's suggested workaround:
-> customer payments settle to the platform's own account in full, then the
-> worker's share is transferred out separately — manually or via the RazorpayX
-> Payouts API, a distinct product with its own onboarding). Test keys alone
-> don't unblock this. Re-evaluate by checking Route's status directly in the
-> Razorpay dashboard before resuming.
+> **Decided approach: manual settlement + RazorpayX Payouts.** Razorpay
+> **Route** (the original plan below) is blocked — it now requires proof of
+> **>₹40L domestic turnover** (or >₹5L export) in FY25/FY26 before it's
+> granted, an RBI Payment Aggregator rule effective September 2025 that a
+> pre-revenue marketplace like ODJ doesn't meet, and test keys alone don't
+> unblock it. Instead: the hirer pays the full amount via standard Razorpay
+> Checkout into **ODJ's own Razorpay account** (no Route, no Linked
+> Accounts); the platform fee is simply what's not forwarded; the worker's
+> share is disbursed separately via the **RazorpayX Payouts API** — a
+> distinct product with its own onboarding (a RazorpayX current account,
+> business KYC, and — since RazorpayX doesn't do Route's automatic
+> per-worker KYC — our own way of collecting + verifying each worker's
+> bank/UPI payout details, e.g. Fund Account Validation/penny-drop). Needs
+> live research at kickoff: current RazorpayX eligibility/onboarding,
+> minimum balance rules, and the actual Payouts API shape, since this may
+> have moved since last checked — and worth re-confirming Route's status
+> directly in the Razorpay dashboard first, in case eligibility opened up.
 >
-> **Original intended approach (Razorpay Route — escrow marketplace model), kept
-> for reference if/when Route becomes available.** Hirer pays the
-> full amount → held in Razorpay via a Route transfer with `on_hold: true` → released
-> to the worker on job completion (end-of-job OTP). The platform fee is simply the
-> amount not transferred (collect X, transfer Y, keep X−Y); factor in ~1% GST TCS +
-> ~1% TDS (194-O) on payouts. Workers are onboarded as **Linked Accounts** — collect
-> PAN + bank/IFSC in-app, **Razorpay does the KYC verification** (penny-drop, PAN,
-> AML); no government API/approval needed beyond the platform's own Razorpay KYC +
-> Route enablement. Settlement to the worker is ~T+2/T+3 business days after release
-> (Instant Settlement is a paid add-on). Most of this is buildable against **test
-> keys** before activation (KYC/real disbursement are simulated in test mode).
-> Interactive maps + real-time matching (Phase 4) are prerequisites for the job
-> lifecycle this hangs off.
+> **Original intended approach (Razorpay Route — escrow marketplace model),
+> superseded, kept for reference in case turnover ever clears the Route
+> bar.** Hirer pays the full amount → held in Razorpay via a Route transfer
+> with `on_hold: true` → released to the worker on job completion
+> (end-of-job OTP). The platform fee is simply the amount not transferred
+> (collect X, transfer Y, keep X−Y); factor in ~1% GST TCS + ~1% TDS (194-O)
+> on payouts. Workers are onboarded as **Linked Accounts** — collect PAN +
+> bank/IFSC in-app, **Razorpay does the KYC verification** (penny-drop, PAN,
+> AML). Settlement to the worker is ~T+2/T+3 business days after release
+> (Instant Settlement is a paid add-on).
 
 ## 6. Disputes
 
