@@ -2,6 +2,8 @@
 
 How to start developing on each part of the monorepo. For the one-time native
 mobile toolchain (JDK, Android SDK, EAS), see **[INFRA_SETUP.md](./INFRA_SETUP.md)**.
+For Razorpay / RazorpayX account setup (§5 Payments), see
+**[PAYMENTS_SETUP.md](./PAYMENTS_SETUP.md)**.
 
 ## Prerequisites
 

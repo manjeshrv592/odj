@@ -3,6 +3,7 @@ import { View, ActivityIndicator, Alert, Pressable } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter, useLocalSearchParams, type Href } from "expo-router";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { formatPaise } from "@odj/shared";
 import { appApi, JOB_KEY } from "@/lib/app-api";
 import { useOnboardingState } from "@/lib/use-onboarding";
 import { useJob } from "@/lib/use-hirer";
@@ -83,6 +84,18 @@ export default function HirerSearch() {
                   </Text>
                   <Text className="text-sm text-primary">View profile →</Text>
                 </Pressable>
+                {/* The agreed price, fixed when this worker accepted. */}
+                {job?.amountPaise != null && (
+                  <View className="flex-row items-baseline justify-between">
+                    <Text className="text-sm text-muted-foreground">
+                      {job.quantity} {job.rateUnit === "daily" ? "day" : "hour"}
+                      {job.quantity === 1 ? "" : "s"}
+                    </Text>
+                    <Text className="text-xl font-poppins-semibold text-foreground">
+                      {formatPaise(job.amountPaise)}
+                    </Text>
+                  </View>
+                )}
                 <Text className="text-sm text-muted-foreground">
                   {status === "in_progress"
                     ? "Show your worker this code to complete the job:"

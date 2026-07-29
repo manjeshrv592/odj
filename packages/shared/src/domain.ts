@@ -993,13 +993,51 @@ export const offerStatusSchema = z.enum([
 ]);
 export type OfferStatus = z.infer<typeof offerStatusSchema>;
 
-/** Create a hiring search for one profession, centered on the hirer's location. */
-export const createJobSchema = z.object({
-  professionId: z.uuid(),
-  lat: z.number().min(-90).max(90),
-  lng: z.number().min(-180).max(180),
-});
+/**
+ * Which of a worker's two rates prices a job. The hirer picks the unit up front
+ * (a profession only offers a unit if the admin set bounds for it), and the
+ * matched worker's rate for that unit is snapshotted onto the job.
+ */
+export const rateUnitSchema = z.enum(["daily", "hourly"]);
+export type RateUnit = z.infer<typeof rateUnitSchema>;
+
+/** Upper bound on a single booking, to keep a fat-fingered quantity from
+ *  creating an absurd charge (12 h and 30 days are both generous for one job). */
+export const MAX_QUANTITY: Record<RateUnit, number> = { daily: 30, hourly: 12 };
+
+/**
+ * Create a hiring search for one profession, centered on the hirer's location.
+ * `rateUnit` + `quantity` fix the *shape* of the price up front; the actual
+ * amount is only known once a worker accepts (each worker sets their own rate).
+ */
+export const createJobSchema = z
+  .object({
+    professionId: z.uuid(),
+    lat: z.number().min(-90).max(90),
+    lng: z.number().min(-180).max(180),
+    rateUnit: rateUnitSchema,
+    quantity: z.number().int().min(1),
+  })
+  .refine((v) => v.quantity <= MAX_QUANTITY[v.rateUnit], {
+    path: ["quantity"],
+    message: "Quantity is too large for this rate unit",
+  });
 export type CreateJob = z.infer<typeof createJobSchema>;
+
+/**
+ * The agreed price of a job, snapshotted at match time so a later rate change by
+ * the worker can never alter what an existing job costs. Null on a job that
+ * never matched (`searching` / `no_workers` / expired).
+ */
+export const jobPricingSchema = z.object({
+  rateUnit: rateUnitSchema,
+  quantity: z.number().int().min(1),
+  /** The matched worker's rate for `rateUnit`, in whole rupees, as of match. */
+  workerRateRupees: z.number().int().min(0).nullish(),
+  /** `workerRateRupees × quantity`, in paise. Null until a worker accepts. */
+  amountPaise: z.number().int().min(0).nullish(),
+});
+export type JobPricing = z.infer<typeof jobPricingSchema>;
 
 /**
  * Job state the hirer polls (GET /api/app/jobs/:id). `matchedWorker` is present
@@ -1020,6 +1058,8 @@ export const jobViewSchema = z.object({
     })
     .nullish(),
   otpToShow: z.string().nullish(),
+  // What the hirer will be charged. `amountPaise` fills in at match.
+  ...jobPricingSchema.shape,
 });
 export type JobView = z.infer<typeof jobViewSchema>;
 
@@ -1036,6 +1076,9 @@ export const workerJobViewSchema = z.object({
   }),
   // True once the worker has tapped "Start work" (reveals the start OTP flow).
   startRequested: z.boolean(),
+  // The agreed price. `amountPaise` is the gross — the worker's take-home is
+  // this minus the platform fee, shown on the receipt after payment.
+  ...jobPricingSchema.shape,
 });
 export type WorkerJobView = z.infer<typeof workerJobViewSchema>;
 
@@ -1055,6 +1098,8 @@ export const jobListItemSchema = z.object({
   // Only meaningful when status === "completed" — has the caller already rated
   // the other party for this job? Drives the Jobs tab "Rate" / "Rated ✓" affordance.
   ratedByMe: z.boolean().default(false),
+  // Amount shown on the row. Null for jobs that never matched.
+  amountPaise: z.number().int().min(0).nullish(),
 });
 export type JobListItem = z.infer<typeof jobListItemSchema>;
 
@@ -1074,6 +1119,12 @@ export const workerOfferSchema = z.object({
   professionName: z.string(),
   distanceKm: z.number(),
   createdAt: z.coerce.date(),
+  // What this job is worth to the worker, so they can judge the offer before
+  // accepting. Priced from *their own* rate — offers only reach workers who
+  // have a rate set for the requested unit.
+  rateUnit: rateUnitSchema,
+  quantity: z.number().int().min(1),
+  amountPaise: z.number().int().min(0),
 });
 export type WorkerOffer = z.infer<typeof workerOfferSchema>;
 

@@ -17,6 +17,7 @@ import {
   createJobSchema,
   verifyOtpSchema,
   submitRatingSchema,
+  rupeesToPaise,
   type Category,
   type Profession,
   type WorkerProfile,
@@ -801,6 +802,10 @@ async function loadJobView(jobId: string): Promise<JobView | null> {
     professionId: job.professionId,
     matchedWorker,
     otpToShow,
+    rateUnit: job.rateUnit,
+    quantity: job.quantity,
+    workerRateRupees: job.workerRateRupees,
+    amountPaise: job.amountPaise,
   };
 }
 
@@ -836,10 +841,23 @@ appRouter.get("/worker/offers", async (req: Request, res: Response) => {
       jobLat: jobs.lat,
       jobLng: jobs.lng,
       createdAt: jobOffers.createdAt,
+      rateUnit: jobs.rateUnit,
+      quantity: jobs.quantity,
+      dailyRate: workerProfessionRates.dailyRate,
+      hourlyRate: workerProfessionRates.hourlyRate,
     })
     .from(jobOffers)
     .innerJoin(jobs, eq(jobOffers.jobId, jobs.id))
     .innerJoin(professions, eq(jobs.professionId, professions.id))
+    // Inner join: an offer the worker can't price is an offer they can't accept,
+    // so it shouldn't appear in the list at all.
+    .innerJoin(
+      workerProfessionRates,
+      and(
+        eq(workerProfessionRates.professionId, jobs.professionId),
+        eq(workerProfessionRates.workerProfileId, profile.id),
+      ),
+    )
     .where(
       and(
         eq(jobOffers.workerProfileId, profile.id),
@@ -850,18 +868,27 @@ appRouter.get("/worker/offers", async (req: Request, res: Response) => {
     )
     .orderBy(desc(jobOffers.createdAt));
 
-  const offers: WorkerOffer[] = rows.map((r) => ({
-    offerId: r.offerId,
-    jobId: r.jobId,
-    professionName: r.professionName,
-    distanceKm:
-      profile.lat != null && profile.lng != null
-        ? Math.round(
-            haversineKm(profile.lat, profile.lng, r.jobLat, r.jobLng) * 10,
-          ) / 10
-        : 0,
-    createdAt: r.createdAt,
-  }));
+  const offers: WorkerOffer[] = rows.flatMap((r) => {
+    const rate = r.rateUnit === "daily" ? r.dailyRate : r.hourlyRate;
+    if (rate == null) return []; // rate cleared since the offer went out
+    return [
+      {
+        offerId: r.offerId,
+        jobId: r.jobId,
+        professionName: r.professionName,
+        distanceKm:
+          profile.lat != null && profile.lng != null
+            ? Math.round(
+                haversineKm(profile.lat, profile.lng, r.jobLat, r.jobLng) * 10,
+              ) / 10
+            : 0,
+        createdAt: r.createdAt,
+        rateUnit: r.rateUnit,
+        quantity: r.quantity,
+        amountPaise: rupeesToPaise(rate) * r.quantity,
+      },
+    ];
+  });
   res.json({ offers });
 });
 
@@ -892,6 +919,44 @@ appRouter.post(
       return;
     }
 
+    // Price the job from *this* worker's rate before claiming it. `rate_unit`
+    // and `quantity` are fixed at creation and never change, so reading them
+    // outside the transaction is safe — the `status = 'searching'` guard below
+    // is still what decides the race.
+    const [pending] = await db
+      .select({
+        rateUnit: jobs.rateUnit,
+        quantity: jobs.quantity,
+        dailyRate: workerProfessionRates.dailyRate,
+        hourlyRate: workerProfessionRates.hourlyRate,
+      })
+      .from(jobs)
+      .leftJoin(
+        workerProfessionRates,
+        and(
+          eq(workerProfessionRates.professionId, jobs.professionId),
+          eq(workerProfessionRates.workerProfileId, profile.id),
+        ),
+      )
+      .where(eq(jobs.id, offer.jobId))
+      .limit(1);
+    if (!pending) {
+      res.status(404).json({ error: "Job not found" });
+      return;
+    }
+    const rateRupees =
+      pending.rateUnit === "daily" ? pending.dailyRate : pending.hourlyRate;
+    if (rateRupees == null) {
+      // Shouldn't happen (offers only go to workers with a rate), but a rate
+      // cleared between offer and accept would land here. Refuse rather than
+      // create a job with no price.
+      res.status(409).json({
+        error: `Set your ${pending.rateUnit} rate for this profession before accepting`,
+      });
+      return;
+    }
+    const amountPaise = rupeesToPaise(rateRupees) * pending.quantity;
+
     // Atomically claim the job: only one worker can flip it out of `searching`.
     const claimed = await db.transaction(async (tx) => {
       const [job] = await tx
@@ -902,6 +967,9 @@ appRouter.post(
           // Generate the start/end handshake codes at match time.
           startOtp: make4DigitOtp(),
           endOtp: make4DigitOtp(),
+          // Snapshot the agreed price — a later rate change must not move it.
+          workerRateRupees: rateRupees,
+          amountPaise,
           updatedAt: new Date(),
         })
         .where(and(eq(jobs.id, offer.jobId), eq(jobs.status, "searching")))
@@ -978,10 +1046,16 @@ appRouter.post("/jobs", async (req: Request, res: Response) => {
   const u = req.appUser!;
   const hirer = await requireApprovedHirer(u.id, res);
   if (!hirer) return;
-  const { professionId, lat, lng } = parsed.data;
+  const { professionId, lat, lng, rateUnit, quantity } = parsed.data;
 
   const [profession] = await db
-    .select({ name: professions.name })
+    .select({
+      name: professions.name,
+      dailyMin: professions.dailyMin,
+      dailyMax: professions.dailyMax,
+      hourlyMin: professions.hourlyMin,
+      hourlyMax: professions.hourlyMax,
+    })
     .from(professions)
     .where(eq(professions.id, professionId))
     .limit(1);
@@ -990,11 +1064,25 @@ appRouter.post("/jobs", async (req: Request, res: Response) => {
     return;
   }
 
+  // A unit is only offered when the admin set both bounds for it (the same
+  // both-or-neither rule `updateProfessionPricingSchema` enforces on authoring).
+  const unitOffered =
+    rateUnit === "daily"
+      ? profession.dailyMin !== null && profession.dailyMax !== null
+      : profession.hourlyMin !== null && profession.hourlyMax !== null;
+  if (!unitOffered) {
+    res
+      .status(400)
+      .json({ error: `${profession.name} isn't offered on a ${rateUnit} basis` });
+    return;
+  }
+
   const eligible = await findEligibleWorkers(
     professionId,
     lat,
     lng,
     DEFAULT_RADIUS_KM,
+    rateUnit,
   );
 
   const [job] = await db
@@ -1006,6 +1094,8 @@ appRouter.post("/jobs", async (req: Request, res: Response) => {
       lng,
       radiusKm: DEFAULT_RADIUS_KM,
       status: eligible.length > 0 ? "searching" : "no_workers",
+      rateUnit,
+      quantity,
       expiresAt: new Date(Date.now() + JOB_TTL_MS),
     })
     .returning();
@@ -1157,6 +1247,10 @@ appRouter.get("/worker/job", async (req: Request, res: Response) => {
       hirerLat: jobs.lat,
       hirerLng: jobs.lng,
       startRequestedAt: jobs.startRequestedAt,
+      rateUnit: jobs.rateUnit,
+      quantity: jobs.quantity,
+      workerRateRupees: jobs.workerRateRupees,
+      amountPaise: jobs.amountPaise,
     })
     .from(jobs)
     .innerJoin(professions, eq(jobs.professionId, professions.id))
@@ -1185,6 +1279,10 @@ appRouter.get("/worker/job", async (req: Request, res: Response) => {
       lng: row.hirerLng,
     },
     startRequested: row.startRequestedAt != null,
+    rateUnit: row.rateUnit,
+    quantity: row.quantity,
+    workerRateRupees: row.workerRateRupees,
+    amountPaise: row.amountPaise,
   };
   res.json({ job: view });
 });
@@ -1368,6 +1466,7 @@ appRouter.get("/worker/jobs", async (req: Request, res: Response) => {
       hirerLast: hirerProfiles.lastName,
       createdAt: jobs.createdAt,
       ratingId: ratings.id,
+      amountPaise: jobs.amountPaise,
     })
     .from(jobs)
     .innerJoin(professions, eq(jobs.professionId, professions.id))
@@ -1394,6 +1493,7 @@ appRouter.get("/worker/jobs", async (req: Request, res: Response) => {
     counterpartProfileId: r.hirerProfileId,
     createdAt: r.createdAt,
     ratedByMe: r.ratingId != null,
+    amountPaise: r.amountPaise,
   }));
   res.json({ jobs: list });
 });
@@ -1421,6 +1521,7 @@ appRouter.get("/hirer/jobs", async (req: Request, res: Response) => {
       workerLast: workerProfiles.lastName,
       createdAt: jobs.createdAt,
       ratingId: ratings.id,
+      amountPaise: jobs.amountPaise,
     })
     .from(jobs)
     .innerJoin(professions, eq(jobs.professionId, professions.id))
@@ -1444,6 +1545,7 @@ appRouter.get("/hirer/jobs", async (req: Request, res: Response) => {
     counterpartProfileId: r.workerProfileId,
     createdAt: r.createdAt,
     ratedByMe: r.ratingId != null,
+    amountPaise: r.amountPaise,
   }));
   res.json({ jobs: list });
 });

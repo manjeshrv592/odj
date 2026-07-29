@@ -102,8 +102,17 @@ sub-items as scope is refined. `[x]` done · `[~]` in progress · `[ ]` not star
       → **Start work** gate before the start OTP. Job events are push-only (the in-app
       notifications list is reserved for account notices).
 
-## 5. Payments — **up next** (decided 2026-07-29)
+## 5. Payments — **in progress** (decided 2026-07-29)
 
+> **Account setup you need to do:** [PAYMENTS_SETUP.md](../PAYMENTS_SETUP.md) —
+> Razorpay + RazorpayX accounts, KYC, test keys, webhooks.
+
+- [x] **Job pricing (prerequisite)** — a job had no amount at all. The hirer now
+      picks `rateUnit` (daily/hourly) + `quantity` at booking; offers only reach
+      workers who have a rate for that unit; the winner's rate + total are
+      **snapshotted** onto the job at accept, so a later rate change can't move an
+      agreed price. Amounts show on the offer card, search screen, worker job
+      screen and both Jobs tabs.
 - [ ] Collect payment from hirer
 - [ ] Platform fee calculation
 - [ ] Disburse payout to worker
@@ -121,11 +130,27 @@ sub-items as scope is refined. `[x]` done · `[~]` in progress · `[ ]` not star
 > distinct product with its own onboarding (a RazorpayX current account,
 > business KYC, and — since RazorpayX doesn't do Route's automatic
 > per-worker KYC — our own way of collecting + verifying each worker's
-> bank/UPI payout details, e.g. Fund Account Validation/penny-drop). Needs
-> live research at kickoff: current RazorpayX eligibility/onboarding,
-> minimum balance rules, and the actual Payouts API shape, since this may
-> have moved since last checked — and worth re-confirming Route's status
-> directly in the Razorpay dashboard first, in case eligibility opened up.
+> bank/UPI payout details, e.g. Fund Account Validation/penny-drop).
+>
+> **Research confirmed 2026-07-29.** Route: still gated on the same >₹40L
+> turnover rule (compliance deadline was 2025-12-31). RazorpayX: **test mode
+> works before KYC approval**, so the whole feature is buildable with no KYC
+> and no real money; **no minimum balance / setup fee**; payouts cost a **flat
+> ₹2–5 each** regardless of rail (hence instant per-job payout over batching);
+> **RazorpayX Lite is discontinued** for new merchants, so a Current Account is
+> required; idempotency keys are **mandatory** on payouts since 2025-03-15;
+> Account Validation (penny-drop) needs **IP allowlisting**, so it's deferred
+> behind a flag until deployment. **Zero new dependencies**: `expo-web-browser`
+> is already installed for the Payment Link checkout (`react-native-razorpay` is
+> old-architecture only and unusable on Expo SDK 56 / RN 0.85), and the backend
+> uses `fetch` + built-in `node:crypto` for HMAC rather than the `razorpay` SDK.
+>
+> **Tax rates (corrected — the note below was out of date):** TDS u/s 194-O is
+> **0.1%**, not ~1% (cut in Budget 2024, effective 2024-10-01), and only once a
+> participant crosses **₹5L gross in a FY**; GST TCS u/s 52 is **0.5%**, not
+> ~1%. Both are stored as configurable basis points **defaulting to 0** so a CA
+> sets the real values — see the compliance section of
+> [PAYMENTS_SETUP.md](../PAYMENTS_SETUP.md).
 >
 > **Original intended approach (Razorpay Route — escrow marketplace model),
 > superseded, kept for reference in case turnover ever clears the Route
