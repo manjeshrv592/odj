@@ -6,13 +6,15 @@ import { StatusBar } from "expo-status-bar";
 import { View, ActivityIndicator } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { SafeAreaProvider } from "react-native-safe-area-context";
-import {
-  useFonts,
-  Poppins_400Regular,
-  Poppins_500Medium,
-  Poppins_600SemiBold,
-  Poppins_700Bold,
-} from "@expo-google-fonts/poppins";
+// Import each weight from its own subpath, NOT from the package root. The root
+// `index.js` is a barrel that `require()`s all 18 Poppins weights, and Metro
+// can't tree-shake asset requires — importing from it ships every weight and
+// cost ~2.4 MB of dead font data in the APK.
+import { useFonts } from "@expo-google-fonts/poppins/useFonts";
+import { Poppins_400Regular } from "@expo-google-fonts/poppins/400Regular";
+import { Poppins_500Medium } from "@expo-google-fonts/poppins/500Medium";
+import { Poppins_600SemiBold } from "@expo-google-fonts/poppins/600SemiBold";
+import { Poppins_700Bold } from "@expo-google-fonts/poppins/700Bold";
 import { Providers } from "@/components/providers";
 import { useSession } from "@/lib/auth-client";
 import { useOnboardingState } from "@/lib/use-onboarding";
