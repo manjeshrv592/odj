@@ -1,5 +1,8 @@
 # ODJ — Infrastructure Setup (Maps + Push Notifications)
 
+> **Looking for payments?** Razorpay / RazorpayX account setup for §5 lives in
+> [PAYMENTS_SETUP.md](./PAYMENTS_SETUP.md).
+
 > **Why this exists.** The Uber-style hiring flow (hirer searches → nearby workers
 > get a push → first to accept wins → hirer sees the worker on a live map) needs an
 > **interactive map** and **push notifications**. Neither works in **Expo Go** — both

@@ -3,7 +3,7 @@ import { View, ScrollView, ActivityIndicator, Alert } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter, type Href } from "expo-router";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import type { WorkerOffer } from "@odj/shared";
+import { formatPaise, type WorkerOffer } from "@odj/shared";
 import {
   appApi,
   ONBOARDING_STATE_KEY,
@@ -28,13 +28,20 @@ function OfferCard({
   onDecline: () => void;
   busy: boolean;
 }) {
+  const unit = offer.rateUnit === "daily" ? "day" : "hour";
   return (
     <Card className="gap-2 border-primary">
       <Text className="font-poppins-semibold text-foreground">
         {offer.professionName}
       </Text>
+      {/* Priced from this worker's own rate, so they can judge the offer
+          before accepting rather than after. */}
+      <Text className="text-2xl font-poppins-semibold text-foreground">
+        {formatPaise(offer.amountPaise)}
+      </Text>
       <Text className="text-sm text-muted-foreground">
-        ~{offer.distanceKm} km away
+        {offer.quantity} {unit}
+        {offer.quantity === 1 ? "" : "s"} · ~{offer.distanceKm} km away
       </Text>
       <View className="flex-row gap-2 pt-1">
         <Button className="flex-1" onPress={onAccept} disabled={busy}>

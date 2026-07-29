@@ -3,6 +3,7 @@ import { View, ScrollView, ActivityIndicator, Alert, Pressable } from "react-nat
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter, type Href } from "expo-router";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { formatPaise } from "@odj/shared";
 import { appApi, WORKER_JOB_KEY } from "@/lib/app-api";
 import { useWorkerJob } from "@/lib/use-worker";
 import { Map, type MapPoint } from "@/components/map";
@@ -98,6 +99,18 @@ export default function WorkerJobScreen() {
             </Text>
             <Text className="text-sm text-primary">View profile →</Text>
           </Pressable>
+          {/* Gross for the job — the platform fee comes off at payout time and
+              is itemised on the receipt once the hirer has paid. */}
+          {job.amountPaise != null && (
+            <Text className="pt-1 text-xl font-poppins-semibold text-foreground">
+              {formatPaise(job.amountPaise)}
+              <Text className="text-sm font-poppins text-muted-foreground">
+                {"  "}for {job.quantity}{" "}
+                {job.rateUnit === "daily" ? "day" : "hour"}
+                {job.quantity === 1 ? "" : "s"}
+              </Text>
+            </Text>
+          )}
         </View>
 
         {center ? (

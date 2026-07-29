@@ -1,18 +1,16 @@
-import { View, ScrollView, ActivityIndicator, Alert } from "react-native";
+import { View, ScrollView, ActivityIndicator } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter, useLocalSearchParams, type Href } from "expo-router";
-import { useQuery, useMutation } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { appApi } from "@/lib/app-api";
 import { useSession } from "@/lib/auth-client";
-import { useOnboardingState } from "@/lib/use-onboarding";
 import { Text } from "@/components/ui/text";
 import { Button } from "@/components/ui/button";
 
-/** Hirer step 2 — pick the exact profession, then start a search. */
+/** Hirer step 2 — pick the exact profession, then set duration on `book`. */
 export default function HirerProfessions() {
   const router = useRouter();
   const { data: session } = useSession();
-  const { data: state } = useOnboardingState();
   const params = useLocalSearchParams<{
     categoryId: string;
     categoryName?: string;
@@ -23,22 +21,6 @@ export default function HirerProfessions() {
     queryKey: ["catalog", "professions", categoryId],
     queryFn: () => appApi.professions(categoryId),
     enabled: !!session?.user && !!categoryId,
-  });
-
-  const start = useMutation({
-    mutationFn: (professionId: string) => {
-      const lat = state?.hirer?.lat;
-      const lng = state?.hirer?.lng;
-      if (lat == null || lng == null) {
-        throw new Error(
-          "Your location isn't set. Please update it in your profile first.",
-        );
-      }
-      return appApi.createJob({ professionId, lat, lng });
-    },
-    onSuccess: (job) =>
-      router.push(`/(hirer)/search?jobId=${job.id}` as Href),
-    onError: (e: Error) => Alert.alert("Couldn't start search", e.message),
   });
 
   return (
@@ -66,17 +48,16 @@ export default function HirerProfessions() {
                 key={p.id}
                 variant="outline"
                 className="h-auto items-center justify-start gap-3 p-4"
-                disabled={start.isPending}
-                onPress={() => start.mutate(p.id)}
+                onPress={() =>
+                  router.push(
+                    `/(hirer)/book?categoryId=${categoryId}&professionId=${p.id}&professionName=${encodeURIComponent(p.name)}` as Href,
+                  )
+                }
               >
                 <Text className="flex-1 font-poppins-medium text-foreground">
                   {p.name}
                 </Text>
-                {start.isPending ? (
-                  <ActivityIndicator />
-                ) : (
-                  <Text className="text-2xl text-muted-foreground">›</Text>
-                )}
+                <Text className="text-2xl text-muted-foreground">›</Text>
               </Button>
             ))}
           </View>

@@ -36,6 +36,7 @@ export default function HirerLayout() {
         options={{ title: "Profile", tabBarIcon: () => <TabEmoji emoji="👤" /> }}
       />
       <Tabs.Screen name="professions" options={{ href: null }} />
+      <Tabs.Screen name="book" options={{ href: null }} />
       <Tabs.Screen name="search" options={{ href: null }} />
       <Tabs.Screen name="rate-job" options={{ href: null }} />
       <Tabs.Screen name="worker-profile" options={{ href: null }} />

@@ -5,3 +5,4 @@
 export * from "./env";
 export * from "./health";
 export * from "./domain";
+export * from "./payments";

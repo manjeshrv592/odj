@@ -1,7 +1,7 @@
 import * as React from "react";
 import { View, Pressable, ActivityIndicator } from "react-native";
 import { useQuery } from "@tanstack/react-query";
-import type { JobListItem, JobListFilter } from "@odj/shared";
+import { formatPaise, type JobListItem, type JobListFilter } from "@odj/shared";
 import { useSession } from "@/lib/auth-client";
 import { Text } from "@/components/ui/text";
 import { Card } from "@/components/ui/card";
@@ -112,6 +112,9 @@ export function JobList({
                   )}
                   <Text className="text-sm text-muted-foreground">
                     {fmtDate(j.createdAt)}
+                    {j.amountPaise != null
+                      ? ` · ${formatPaise(j.amountPaise)}`
+                      : ""}
                   </Text>
                 </View>
                 <View className="items-end gap-1">

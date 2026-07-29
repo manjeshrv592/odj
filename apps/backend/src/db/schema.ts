@@ -377,6 +377,9 @@ export const jobStatus = pgEnum("job_status", [
   "no_workers",
 ]);
 
+/** Which of the worker's two rates prices a job (§5). */
+export const rateUnit = pgEnum("rate_unit", ["daily", "hourly"]);
+
 /** Lifecycle of a single job offer sent to one worker. */
 export const offerStatus = pgEnum("offer_status", [
   "pending",
@@ -418,6 +421,17 @@ export const jobs = pgTable(
     startedAt: timestamp("started_at"),
     completedAt: timestamp("completed_at"),
     cancelledBy: text("cancelled_by"), // 'hirer' | 'worker'
+    // ── Pricing (§5) ────────────────────────────────────────────────────────
+    // The hirer fixes the *shape* of the price at booking (`rate_unit` +
+    // `quantity`); the amount is only knowable once a worker accepts, because
+    // every worker sets their own rate. `worker_rate_rupees` + `amount_paise`
+    // are **snapshots** taken in the accept transaction — a later rate change
+    // must never alter what an already-agreed job costs. Null on jobs that
+    // never matched (searching / no_workers / expired).
+    rateUnit: rateUnit("rate_unit").notNull().default("daily"),
+    quantity: integer("quantity").notNull().default(1),
+    workerRateRupees: integer("worker_rate_rupees"),
+    amountPaise: integer("amount_paise"),
     createdAt: timestamp("created_at").notNull().defaultNow(),
     expiresAt: timestamp("expires_at").notNull(),
     updatedAt: timestamp("updated_at").notNull().defaultNow(),
