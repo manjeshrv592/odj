@@ -15,13 +15,33 @@ TanStack Query, better-auth Expo client.
 > no native module; bundled TS types), and the rates screen uses
 > `@react-native-community/slider` (bundled in Expo Go).
 
+## Release build config (`app.json`)
+
+- `expo.version` (versionName) + `expo.android.versionCode` — **bump both on every
+  build that leaves the machine**; two differently-behaving APKs once shipped with
+  identical version metadata and were impossible to tell apart. Convention and
+  rebuild steps live in [DEPLOYMENT.md](../../DEPLOYMENT.md).
+- `expo-build-properties` plugin — `enableMinifyInReleaseBuilds` +
+  `enableShrinkResourcesInReleaseBuilds` turn on R8 and resource shrinking
+  (~10 MB). ⚠️ The older name `enableProguardInReleaseBuilds` is a **silent no-op**
+  on SDK 56. Release builds also pass `-PreactNativeArchitectures=arm64-v8a`
+  (one ABI instead of four) — together these took the APK from 102 MB to 46 MB.
+- The app is **HTTPS-only** — `usesCleartextTraffic` was removed in 1.1.0. A
+  plain-HTTP backend would need it re-added *and* a full `expo prebuild`.
+- ⚠️ **Do not remove `@expo/ui`, `expo-symbols`, `expo-glass-effect` or
+  `expo-network`** because they look unreferenced in `src/`. The first three are
+  `expo-router` dependencies and `expo-network` is a required *peer* of
+  `@better-auth/expo`; removing them saved ~0 MB and made the release build crash
+  on launch with `Cannot find native module 'ExpoNetwork'`. Check the dependency
+  tree, not the app source.
+
 > Expo is versioned — read `apps/mobile/AGENTS.md` (points at the exact SDK 56
 > docs) before writing framework code.
 
 ```
 apps/mobile/
 ├── package.json
-├── app.json               # expo config — name "ODJ", scheme "odj"
+├── app.json               # expo config — name "ODJ", scheme "odj", version + release build props
 ├── babel.config.js        # babel-preset-expo (jsxImportSource nativewind) + nativewind/babel
 ├── metro.config.js        # monorepo watchFolders + withNativeWind(global.css)
 ├── tailwind.config.js     # nativewind preset, darkMode class, theme tokens
