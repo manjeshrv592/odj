@@ -205,6 +205,9 @@ sub-items as scope is refined. `[x]` done · `[~]` in progress · `[ ]` not star
 - [x] **Release APK** — 102 MB → **46 MB** (release build, arm64-only, R8
       minification, font subpath imports). Verified on device against the hosted
       backend. Debug-signed — fine for sideloading, not for Play Store.
+- [x] **Versioned releases** — current `1.1.0` / `versionCode 2`, HTTPS-only
+      (`usesCleartextTraffic` removed). Every distributed build must bump both
+      values; two builds once shipped as `1.0.0/1` and couldn't be told apart.
 - [x] **Demo seed** — `db:seed-demo`: catalog + approved online workers so the app
       isn't empty. Idempotent.
 - [ ] Production hardening — non-root services, rotated credentials, real release

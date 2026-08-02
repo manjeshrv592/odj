@@ -137,12 +137,19 @@ pnpm build                # build all (turbo)
 pnpm db:generate          # drizzle-kit: generate migration from schema
 pnpm db:migrate           # apply migrations
 pnpm db:studio            # drizzle studio
-pnpm --filter @odj/backend db:setup   # create `odj` DB (if missing) + migrate
+pnpm --filter @odj/backend db:setup       # create `odj` DB (if missing) + migrate
+pnpm --filter @odj/backend db:seed-demo   # demo catalog + approved online workers
 ```
 
 **Status:** the `odj` database is created and migrated; health endpoints return
 connected. Email is live — Resend domain `sigtest.website` is verified and a real
-test send succeeded (sender `no-reply@sigtest.website`).
+test send succeeded (sender `no-reply@sigtest.website`). ⚠️ Resend's free tier is
+~100 emails/day and **email OTP is the only login**, so every sign-in consumes one.
+
+**Hosted demo (stakeholders):** <https://139-84-222-70.sslip.io> — backend + admin
+web on a Vultr VPS behind nginx over HTTPS, with a versioned release APK. Full
+details, deploy steps and the hardening backlog live in
+[DEPLOYMENT.md](./DEPLOYMENT.md).
 
 **Health checks (backend):** `GET /api/health` (liveness, never fails on DB
 blips) and `GET /api/health/db` (readiness — 200 if DB reachable, 503 if not).

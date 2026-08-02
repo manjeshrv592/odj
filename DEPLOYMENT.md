@@ -209,8 +209,10 @@ Edit `apps/mobile/app.json` before rebuilding:
   sha256sum <file>.apk                                  # distinguishes rebuilds
   ```
 
-**Current state:** the distributed APK is `1.0.0 / versionCode 1`. The next
-rebuild should start the convention at **`1.1.0` / `versionCode 2`.**
+**Current release: `1.1.0` / `versionCode 2`** — HTTPS-only, distributed as
+`ODJ-demo-v1.1.0.apk`. Verified on-device: installs as an in-place upgrade over
+versionCode 1, session survives, authenticated API calls return 304 over HTTPS,
+push-token registration returns 204. Next build is `1.2.0` / `versionCode 3`.
 
 Output: `android/app/build/outputs/apk/release/app-release.apk` (~46 MB).
 
@@ -292,8 +294,8 @@ registration) since phone-based login is what workers will actually expect.
 
 ### Lower priority
 
-- [ ] Drop `usesCleartextTraffic` from `app.json` now everything is HTTPS
-      (needs a full `expo prebuild`, so bundle it with the next version bump).
+- [x] ~~Drop `usesCleartextTraffic`~~ — done in `1.1.0`; the app is now
+      HTTPS-only rather than merely preferring HTTPS.
 - [ ] APK is **debug-signed** — fine for sideloading, triggers Play Protect
       warnings, unusable for Play Store. A real keystore must be created and then
       **kept forever**; losing it means the app can never be updated.
