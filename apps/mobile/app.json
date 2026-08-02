@@ -2,7 +2,7 @@
   "expo": {
     "name": "ODJ",
     "slug": "odj-mobile",
-    "version": "1.0.0",
+    "version": "1.1.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "odj",
@@ -13,6 +13,7 @@
     },
     "android": {
       "package": "com.sarvam.odj",
+      "versionCode": 2,
       "googleServicesFile": "./google-services.json",
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
@@ -38,8 +39,7 @@
         {
           "android": {
             "enableMinifyInReleaseBuilds": true,
-            "enableShrinkResourcesInReleaseBuilds": true,
-            "usesCleartextTraffic": true
+            "enableShrinkResourcesInReleaseBuilds": true
           }
         }
       ],
