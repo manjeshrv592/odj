@@ -169,6 +169,49 @@ rm -rf android/app/build/generated/assets        # .env is not a Gradle input;
 cd android && ./gradlew assembleRelease -PreactNativeArchitectures=arm64-v8a
 ```
 
+### Versioning — bump it on EVERY build that leaves this machine
+
+**Rule: never hand out two different APKs carrying the same version.** This bit
+us once already: the pre-HTTPS build and the HTTPS build were byte-for-byte
+different but both reported `versionName 1.0.0 / versionCode 1`, so neither the
+phone, the tester, nor the person distributing it could tell which was which —
+and the older one could not log in at all.
+
+Edit `apps/mobile/app.json` before rebuilding:
+
+```jsonc
+{
+  "expo": {
+    "version": "1.1.0",              // versionName — human-facing
+    "android": { "versionCode": 2 }  // integer, MUST increase, never reused
+  }
+}
+```
+
+- **`version`** — semver. Bump patch for a rebuild that only changes config (a
+  new API URL), minor for shipped feature work, major for a milestone.
+- **`versionCode`** — a plain counter, `+1` on every distributed build. Android
+  uses it for upgrade logic and Play Store rejects a re-used or lower value.
+  Getting this right now avoids pain later; it is not something you can
+  retroactively fix once builds are in people's hands.
+- These live in `app.json`, which `expo prebuild` writes into
+  `android/app/build.gradle`, so **a version bump requires a prebuild**, not just
+  an `assembleRelease`:
+  ```bash
+  npx expo prebuild --clean -p android && cd android && \
+    ./gradlew assembleRelease -PreactNativeArchitectures=arm64-v8a
+  ```
+- **Name the file with its version** when copying it out —
+  `ODJ-demo-v1.1.0.apk` — so it is identifiable without `aapt`.
+- Verify what you're about to send:
+  ```bash
+  aapt dump badging <file>.apk | grep "^package:"      # versionCode/versionName
+  sha256sum <file>.apk                                  # distinguishes rebuilds
+  ```
+
+**Current state:** the distributed APK is `1.0.0 / versionCode 1`. The next
+rebuild should start the convention at **`1.1.0` / `versionCode 2`.**
+
 Output: `android/app/build/outputs/apk/release/app-release.apk` (~46 MB).
 
 Always confirm the URL actually landed, then install and launch it before
@@ -185,15 +228,78 @@ adb logcat -d | grep -E "FATAL|JavascriptException|Cannot find native module"
 `ufw` active: **22** and **80/443** only. Ports 3000 and 4000 are not exposed —
 they're reachable only through nginx.
 
-## Known gaps / hardening backlog
+## Hardening plan
 
-- [ ] **Rotate the Vultr root password** (it was shared in plaintext during setup).
-- [ ] Run `odj-backend` / `odj-web` as a non-root user.
-- [ ] Disable SSH password auth once key access is confirmed (`/root/.ssh/authorized_keys`).
-- [ ] Drop `usesCleartextTraffic` from `app.json` now that everything is HTTPS
-      (needs a full `expo prebuild`, so it isn't free).
+Not done — the box is a demo shortcut. These are ordered by *risk now*, not
+effort. Items 1–3 matter if this server outlives the demo.
+
+### 1. Rotate the root password + lock down SSH — **do first, ~5 min**
+
+The root password was transmitted in plaintext during setup and is visible to
+anyone with Vultr account access. Key auth is already in place
+(`/root/.ssh/authorized_keys`), so rotating breaks nothing.
+
+```bash
+# Vultr panel → Server → Settings → Change root password, OR:
+ssh root@139.84.222.70 passwd
+
+# then, once key auth is confirmed working from a SECOND terminal:
+#   /etc/ssh/sshd_config  →  PasswordAuthentication no
+#   systemctl restart ssh
+```
+
+⚠️ Verify key login in a second session **before** disabling password auth, or a
+mistake locks you out (recoverable only via Vultr's web console).
+
+### 2. Run the services as a non-root user — ~30 min
+
+Both units currently run as root, so any RCE in the app is immediate root. Ports
+3000/4000 are above 1024, so no privilege is needed to bind them.
+
+```bash
+adduser --system --group --home /srv/odj --shell /usr/sbin/nologin odj
+chown -R odj:odj /srv/odj
+chmod 600 /srv/odj/.env && chown odj:odj /srv/odj/.env
+# add to BOTH unit files, under [Service]:
+#   User=odj
+#   Group=odj
+systemctl daemon-reload && systemctl restart odj-backend odj-web
+```
+
+Watch for: pnpm's store and `node_modules` must be owned by `odj` (re-run
+`pnpm install` as that user if in doubt), and `.next/` must be writable. The
+Postgres role is already separate, so the DB needs no change. Consider adding
+`NoNewPrivileges=true` and `ProtectSystem=strict` while editing the units.
+
+### 3. Email capacity — a decision, not a task
+
+**Resend's free tier is ~100 emails/day and login is email-OTP only, so every
+single sign-in burns one.** Hitting the cap means *nobody can log in*, and it
+will look like the app is broken rather than rate-limited.
+
+Rough budget: one stakeholder testing both roles and re-logging a few times can
+easily use 5–10. Twenty people through a demo day is plausible at the cap.
+
+Options, cheapest first:
+- **Brief stakeholders to log in once** and stay signed in — sessions persist, so
+  repeat logins are usually avoidable.
+- **Lengthen the session TTL** in better-auth so tokens outlive the demo.
+- **Upgrade Resend** (paid tier ≈ $20/mo for ~50k emails) if the demo is wide.
+- Watch the Resend dashboard during the demo; the cap arrives without warning.
+
+Longer term this argues for SMS OTP (already on the roadmap, blocked on DLT
+registration) since phone-based login is what workers will actually expect.
+
+### Lower priority
+
+- [ ] Drop `usesCleartextTraffic` from `app.json` now everything is HTTPS
+      (needs a full `expo prebuild`, so bundle it with the next version bump).
 - [ ] APK is **debug-signed** — fine for sideloading, triggers Play Protect
-      warnings, unusable for Play Store. Needs a real keystore, kept forever.
-- [ ] No backups of the `odj` database (Vultr auto-backups cover the whole disk).
-- [ ] `versionCode` is still `1`; bump it for clean in-place APK updates.
-- [ ] Resend free tier is ~100 emails/day and **every login consumes one**.
+      warnings, unusable for Play Store. A real keystore must be created and then
+      **kept forever**; losing it means the app can never be updated.
+- [ ] No logical backups of the `odj` database — Vultr auto-backups cover the
+      whole disk, but a nightly `pg_dump` to object storage would be better.
+- [ ] No monitoring/alerting: if a service dies, systemd restarts it, but nothing
+      tells you it happened.
+- [ ] `sslip.io` is a third-party DNS service. Fine for a demo; a real domain is
+      the right move before anything production-facing.
