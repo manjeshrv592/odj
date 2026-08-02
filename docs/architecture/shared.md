@@ -9,10 +9,11 @@ packages/shared/
 ├── package.json        # exports ".", "./env", "./health", "./domain"
 ├── tsconfig.json
 └── src/
-    ├── index.ts        # barrel — re-exports env, health, domain
+    ├── index.ts        # barrel — re-exports env, health, domain, payments
     ├── env.ts          # environment-variable schemas
     ├── health.ts       # health-check response contracts
-    └── domain.ts       # core domain primitives
+    ├── domain.ts       # core domain primitives
+    └── payments.ts     # money primitives + platform-fee split (§5)
 ```
 
 ## src/env.ts
@@ -134,17 +135,21 @@ packages/shared/
   - `setOnlineSchema` `{ online }`; `WorkerProfile` also carries `isOnline`.
   - `jobStatusSchema` (`searching|matched|cancelled|expired|no_workers`),
     `offerStatusSchema` (`pending|accepted|declined|cancelled|expired`).
-  - `createJobSchema` `{ professionId, lat, lng }`; `jobViewSchema` / `JobView`
-    (`{ id, status, professionId, matchedWorker?, otpToShow? }`, hirer poll — `otpToShow`
-    is the start code while `matched`, the end code while `in_progress`).
+  - `createJobSchema` `{ professionId, lat, lng, rateUnit, quantity }` (refine:
+    `quantity ≤ MAX_QUANTITY[rateUnit]`); `jobViewSchema` / `JobView`
+    (`{ id, status, professionId, matchedWorker?, otpToShow?, …jobPricing }`, hirer
+    poll — `otpToShow` is the start code while `matched`, the end code while
+    `in_progress`).
   - `workerOfferSchema` / `WorkerOffer` (`{ offerId, jobId, professionName, distanceKm,
-    createdAt }`) + `workerOffersViewSchema`.
+    createdAt, rateUnit, quantity, amountPaise }`) + `workerOffersViewSchema`. The
+    amount is priced from *that worker's own* rate, so they see their earnings
+    before accepting.
   - `jobStatusSchema` includes `in_progress` / `completed`. `workerJobViewSchema` /
     `WorkerJobView` (worker's active job — `{ id, status, professionName, hirer:{name,
     lat,lng}, startRequested }`). `verifyOtpSchema` `{ code }` (4 digits).
   - `jobListFilterSchema` (`active|completed|cancelled`), `jobListItemSchema` /
     `JobListItem` (`{ id, status, professionName, counterpartName,
-    counterpartProfileId?, createdAt, ratedByMe }`) + `jobsListViewSchema`
+    counterpartProfileId?, createdAt, ratedByMe, amountPaise? }`) + `jobsListViewSchema`
     (worker/hirer Jobs tabs). `counterpartProfileId` is null when no worker ever
     matched (cancelled/expired/no_workers); links a Jobs-tab row to the
     counterpart's profile-view screen.
@@ -190,6 +195,38 @@ packages/shared/
     (`joined`/`message`/`ended`/`presence`/`typing`/`error`) aren't zod-shared
     — typed ad-hoc on each side (`ChatWsMessage` in `use-chat.ts`).
   - `notificationTypeSchema` extended with `chat_message`.
+- **Job pricing (§5 prerequisite, in `domain.ts`):**
+  - `rateUnitSchema` / `RateUnit` — `daily | hourly`. Which of the worker's two
+    rates prices a job; a profession only offers a unit when the admin set both
+    of its bounds.
+  - `MAX_QUANTITY` — `{ daily: 30, hourly: 12 }`; caps a single booking so a
+    fat-fingered quantity can't create an absurd charge.
+  - `jobPricingSchema` / `JobPricing` — `{ rateUnit, quantity, workerRateRupees?,
+    amountPaise? }`, spread into `jobViewSchema` and `workerJobViewSchema`. The
+    last two are **snapshots** taken in the accept transaction, so a later rate
+    change can't move the price of an agreed job; null on jobs that never matched.
+
+## src/payments.ts
+
+Money primitives for §5. **All money is integer paise** — floats can't represent
+`0.1` exactly, and Razorpay's APIs take paise anyway, so paise-in/paise-out
+avoids a conversion layer.
+
+- `PAISE_PER_RUPEE` (100), `BPS_DENOMINATOR` (10 000). Fees/taxes are configured
+  in **basis points** so a rate like 0.1% (TDS 194-O) is an exact integer (10).
+- `rupeesToPaise(rupees)` — whole rupees → paise; throws on a non-integer so a
+  stray float can't slip in. Worker rates are stored as whole rupees.
+- `formatPaise(paise)` — display string with **en-IN** grouping (`₹1,00,000`, not
+  `₹100,000`); shows paise only when there's a remainder.
+- `feeConfigSchema` / `FeeConfig` — `{ platformFeeBps, tdsBps, tcsBps }`.
+  `DEFAULT_FEE_CONFIG` = 15% platform fee, **0 tax** — TDS (0.1%, above ₹5L/FY)
+  and GST TCS (0.5%) default to zero so a CA sets the real values rather than the
+  code encoding a guess at tax law. See `PAYMENTS_SETUP.md`.
+- `jobSplitSchema` / `JobSplit` + `splitJobAmount(grossPaise, fees)` — the four
+  receipt lines. Each deduction is **floored** and `net` is the remainder, so the
+  lines always sum back to gross with no orphaned paise and rounding can only
+  favour the worker. Deterministic and integer-only, so backend, web and mobile
+  always agree on the receipt.
 
 > Grows as features land. Prefer generating DB-owned shapes via `drizzle-zod`
 > (in backend) and re-exporting refined schemas here.

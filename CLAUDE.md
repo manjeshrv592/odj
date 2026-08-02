@@ -103,6 +103,11 @@ sign-in.
   web/mobile primitives. Edit visual tokens here (in lockstep across web + mobile),
   not per element.
 - **`docs/FEATURES.md`** — the full feature roadmap with status.
+- **Operational docs (repo root)** — one-time setup + running infrastructure:
+  `DEVELOPMENT.md` (local dev), `INFRA_SETUP.md` (mobile native toolchain, EAS,
+  maps/push), `PAYMENTS_SETUP.md` (Razorpay + RazorpayX accounts, KYC, §5),
+  `DEPLOYMENT.md` (the live demo VPS: URLs, nginx/systemd/TLS layout, deploy
+  steps, seed data, APK rebuild).
 
 **Maintenance rule (do this as you code):** when you add or change a
 file/function/component, update the matching `docs/architecture/<pkg>.md` entry.

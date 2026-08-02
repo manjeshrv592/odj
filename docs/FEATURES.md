@@ -105,7 +105,8 @@ sub-items as scope is refined. `[x]` done · `[~]` in progress · `[ ]` not star
 ## 5. Payments — **in progress** (decided 2026-07-29)
 
 > **Account setup you need to do:** [PAYMENTS_SETUP.md](../PAYMENTS_SETUP.md) —
-> Razorpay + RazorpayX accounts, KYC, test keys, webhooks.
+> Razorpay + RazorpayX accounts, KYC, test keys, webhooks. Phases 2–5 are blocked
+> only on the Razorpay **test** key pair (Step 1).
 
 - [x] **Job pricing (prerequisite)** — a job had no amount at all. The hirer now
       picks `rateUnit` (daily/hourly) + `quantity` at booking; offers only reach
@@ -190,6 +191,24 @@ sub-items as scope is refined. `[x]` done · `[~]` in progress · `[ ]` not star
       Prompted both via an auto-navigate rate screen right after completion (push
       deep-link for the hirer, direct navigation for the worker) and a persistent
       "Rate →" entry on completed Jobs-tab rows. Admin visibility deferred.
+
+## 9. Deployment (stakeholder demo)
+
+- [x] **Hosted demo live** — backend + admin web on a Vultr Ubuntu 26.04 VPS,
+      single origin behind nginx (`/` → Next.js, `/api` + `/ws` → Express), both
+      under systemd and enabled on boot. See [DEPLOYMENT.md](../DEPLOYMENT.md).
+- [x] **HTTPS** via `sslip.io` + Let's Encrypt (no domain purchased), auto-renewing.
+      Not cosmetic: Chrome on Android enforces HTTPS-First so the plain-HTTP site
+      wouldn't open on a phone, and the HTTP→HTTPS `301` downgraded the login
+      `POST` to `GET` and dropped its body, silently breaking email-OTP sign-in
+      from the app.
+- [x] **Release APK** — 102 MB → **46 MB** (release build, arm64-only, R8
+      minification, font subpath imports). Verified on device against the hosted
+      backend. Debug-signed — fine for sideloading, not for Play Store.
+- [x] **Demo seed** — `db:seed-demo`: catalog + approved online workers so the app
+      isn't empty. Idempotent.
+- [ ] Production hardening — non-root services, rotated credentials, real release
+      keystore, DB backups (see DEPLOYMENT.md "Known gaps").
 
 > Many more features will be added as the product evolves. The user drives
 > feature work step by step.
