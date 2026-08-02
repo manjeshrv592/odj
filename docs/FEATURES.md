@@ -210,6 +210,10 @@ sub-items as scope is refined. `[x]` done · `[~]` in progress · `[ ]` not star
       values; two builds once shipped as `1.0.0/1` and couldn't be told apart.
 - [x] **Demo seed** — `db:seed-demo`: catalog + approved online workers so the app
       isn't empty. Idempotent.
+- [x] **End-to-end verified on the hosted stack** — the full hiring journey
+      (browse → book with duration → search → accept → start OTP → chat → end OTP
+      → rate) confirmed working against the VPS from the release APK, not just
+      locally.
 - [ ] Production hardening — non-root services, rotated credentials, real release
       keystore, DB backups (see DEPLOYMENT.md "Known gaps").
 
