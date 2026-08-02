@@ -37,7 +37,8 @@ apps/mobile/
     │   │   ├── index.tsx       # Home tab: active-job banner + pick a category
     │   │   ├── jobs.tsx        # Jobs tab: Active/Completed/Cancelled (<JobList>)
     │   │   ├── profile.tsx     # Profile tab: own rating + notifications + theme + sign out
-    │   │   ├── professions.tsx # pick a profession → POST /jobs → search (push-only)
+    │   │   ├── professions.tsx # pick a profession → book (duration step)
+    │   │   ├── book.tsx        # §5: rate unit + quantity + est. range → POST /jobs → search
     │   │   ├── search.tsx      # live "searching…" → matched (start OTP) → in_progress (end OTP) → auto-navigates to rate-job on completion
     │   │   ├── rate-job.tsx    # rate the matched worker for a completed job (?jobId)
     │   │   ├── worker-profile.tsx # a matched worker's public profile + rating (?id)
@@ -93,8 +94,12 @@ apps/mobile/
 
 ## src/app/_layout.tsx
 - Imports `../global.css`. Loads the **Poppins** brand font via
-  `useFonts` (`@expo-google-fonts/poppins`, weights 400/500/600/700) and shows a
-  spinner until ready. Root `Stack` (headers hidden) wrapped in
+  `useFonts`, weights 400/500/600/700, and shows a spinner until ready.
+  ⚠️ Each weight is imported from its **own subpath**
+  (`@expo-google-fonts/poppins/400Regular`), never from the package root: the
+  root `index.js` is a barrel that `require()`s all 18 weights, and Metro cannot
+  tree-shake asset requires, so importing from it ships every weight (~2.3 MB of
+  dead font data). Root `Stack` (headers hidden) wrapped in
   `GestureHandlerRootView` → `SafeAreaProvider` → `<Providers>` → `<SessionGate>`.
 - `SessionGate` — watches `useSession()` **and** `useOnboardingState()` (GET
   `/api/app/me`); routes by state: unauthenticated → `(auth)/login`; no role →
@@ -157,11 +162,22 @@ apps/mobile/
   + avg/count, from `hirer.avgRating/ratingCount`) + `<NotificationsList>` + theme +
   sign out.
 - `professions.tsx` — `HirerProfessions` (`?categoryId`): professions in the category;
-  tapping one `appApi.createJob({ professionId, hirer lat/lng })` → search.
+  tapping one navigates to `book?categoryId&professionId&professionName`.
+- `book.tsx` — `HirerBook` (§5 job pricing): the duration step that fixes how the
+  job is priced before searching. `<Segmented>` unit toggle (only units the admin
+  enabled — both bounds set — are offered; hidden when only one applies) +
+  `QuantityStepper` bounded by `MAX_QUANTITY[unit]`, so it can't produce a value
+  `createJobSchema` would reject. Shows an **estimated range** from the admin
+  bounds (`formatPaise(rupeesToPaise(min) × qty)` – max), not an exact price:
+  every worker sets their own rate, so the real amount is only known once one
+  accepts. Reuses the professions query key, so it's served from cache. Then
+  `appApi.createJob({ professionId, lat, lng, rateUnit, quantity })` → search.
+  Falls back to a "not bookable yet" state when a profession has no price bounds.
 - `search.tsx` — `HirerSearch` (`?jobId`): `<Map>` centered on the hirer; `useJob`
   polls every 2s through the lifecycle — "searching…" → matched (worker pin, tap to
-  `worker-profile?id`, a **💬 Chat** button → `chat?jobId`, + the **start code to
-  show** `otpToShow`) → in_progress (**end code to show**) → completed (an effect
+  `worker-profile?id`, a **💬 Chat** button → `chat?jobId`, the agreed
+  **`amountPaise` + quantity/unit** now that a worker has been priced, + the
+  **start code to show** `otpToShow`) → in_progress (**end code to show**) → completed (an effect
   `router.replace`s to `rate-job?jobId` the instant `status` flips, guarded by a ref
   so it fires once) / cancelled, plus "no workers"/"expired". Cancel → `appApi.cancelJob`.
 - `rate-job.tsx` — thin wrapper: `<RateJobScreen jobId backHref="/(hirer)"

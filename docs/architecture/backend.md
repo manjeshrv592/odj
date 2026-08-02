@@ -10,7 +10,8 @@ apps/backend/
 ├── drizzle.config.ts   # drizzle-kit config (schema, out=./drizzle, pg); loads root .env
 ├── drizzle/            # generated SQL migrations (0000_*.sql applied)
 ├── scripts/
-│   └── ensure-db.mjs   # idempotent CREATE DATABASE from DATABASE_URL
+│   ├── ensure-db.mjs   # idempotent CREATE DATABASE from DATABASE_URL
+│   └── seed-demo.ts    # demo/staging catalog + approved online workers (§5 demo)
 └── src/
     ├── index.ts        # entry: start server, graceful shutdown
     ├── app.ts          # createApp() — express app, middleware, routes
@@ -138,12 +139,19 @@ apps/backend/
     with their admin price bounds.
   - **Matching (hiring flow):** `requireApprovedHirer` guard + `loadJobView(jobId)`
     projection. **Worker:** `POST /worker/online` (`is_online` presence),
-    `GET /worker/offers` (pending offers on still-open jobs + Haversine distance),
-    `POST /worker/offers/:id/accept` (**race-safe first-accept-wins**: a tx flips the
-    job out of `searching` via a conditional UPDATE, accepts this offer, cancels the
-    rest, pushes `job_matched` to the hirer), `POST /worker/offers/:id/decline`.
-    **Hirer:** `POST /jobs` (find eligible workers via `lib/matching`, create job +
-    offers, push `job_offer` to each), `GET /jobs/:id` (poll; lazy-expires stale
+    `GET /worker/offers` (pending offers on still-open jobs + Haversine distance +
+    the amount priced from the worker's own rate — inner-joins
+    `worker_profession_rates`, so an offer they can't price never appears),
+    `POST /worker/offers/:id/accept` (**race-safe first-accept-wins**: reads the
+    worker's rate for the job's `rate_unit` and refuses with 409 if it vanished
+    between offer and accept, rather than creating an unpriceable job; then a tx
+    flips the job out of `searching` via a conditional UPDATE, **snapshots
+    `worker_rate_rupees` + `amount_paise`**, accepts this offer, cancels the rest,
+    pushes `job_matched` to the hirer), `POST /worker/offers/:id/decline`.
+    **Hirer:** `POST /jobs` (validates the profession actually offers the requested
+    `rateUnit` — both admin bounds set — then finds eligible workers via
+    `lib/matching`, creates job + offers, pushes `job_offer` to each),
+    `GET /jobs/:id` (poll; lazy-expires stale
     searches; includes `matchedWorker` + `otpToShow` for the current phase),
     `POST /jobs/:id/cancel` (searching/matched/in_progress; notifies the worker).
   - **Job lifecycle (start/end OTP):** on accept the job gets 4-digit `start_otp` +
@@ -320,9 +328,14 @@ apps/backend/
   the room (multi-device aware). Ping/pong heartbeat (30s) prunes dead sockets.
 
 ## src/lib/matching.ts
-- `findEligibleWorkers(professionId, lat, lng, radiusKm)` — Haversine SQL selecting
-  **approved + online** workers who hold the profession, have a location, aren't off
-  today (`worker_days_off`), and are within radius; nearest first.
+- `findEligibleWorkers(professionId, lat, lng, radiusKm, unit)` — Haversine SQL
+  selecting **approved + online** workers who hold the profession, have a location,
+  aren't off today (`worker_days_off`), **and have a rate set for `unit`**
+  (`"daily" | "hourly"`), within radius; nearest first. Returns `rateRupees` per
+  worker. The rate join is what makes §5 possible: a worker with no rate for the
+  requested unit can't be priced, so offering them the job would create a job
+  nobody can be charged for — excluding them here keeps that failure out of the
+  worker's face rather than surfacing it at accept.
 - `haversineKm(aLat,aLng,bLat,bLng)` — JS great-circle distance (offer distances).
 - `DEFAULT_RADIUS_KM` — the fixed 15 km search radius (MVP).
 
@@ -373,6 +386,14 @@ apps/backend/
   `jobStatus` with `in_progress`/`completed` and adds `jobs.start_otp`/`end_otp`/
   `started_at`/`completed_at`/`cancelled_by` (the OTP handshake lifecycle); migration
   `0010_*` adds `jobs.start_requested_at` (the worker's "Start work" gate).
+- `rateUnit` pgEnum (`daily|hourly`) + **job pricing** on `jobs` (migration
+  `0013_*`, additive with defaults so existing rows are safe): `rate_unit`
+  (default `daily`), `quantity` (default 1), `worker_rate_rupees`, `amount_paise`.
+  The hirer fixes the *shape* of the price at booking (`rate_unit` + `quantity`);
+  the amount is only knowable once a worker accepts, since every worker sets their
+  own rate. The last two columns are **snapshots written in the accept
+  transaction** — a worker changing their rate later must never move the price of
+  an already-agreed job. Null on jobs that never matched.
 - `hirer_profiles` — one per user: names, `photo_url`, city/state/lat/lng,
   `hirer_type`, `org_name`, `org_type`, `gst_registered`, `gstin`, `status`,
   `current_step`, `submitted_at`, the same `rejection_reason`/`reviewed_at`/
@@ -427,6 +448,24 @@ apps/backend/
 - Connects to the `postgres` maintenance DB (from `DATABASE_URL`) and
   `CREATE DATABASE` the target if it doesn't exist. Used by `db:ensure`;
   `db:setup` = `db:ensure` + `db:migrate` (one-shot local DB bootstrap).
+
+## scripts/seed-demo.ts
+- `pnpm --filter @odj/backend db:seed-demo` — populates a **demo/staging** DB so
+  the app has something to show. Without it every category list is blank and
+  every search returns "no workers", which reads as broken rather than empty.
+- Seeds 6 categories / 12 professions with admin price bounds (some deliberately
+  single-unit — Truck Driver daily-only, Deep Cleaner hourly-only — to exercise
+  the booking screen's unit handling), 7 approved **online** workers scattered
+  2–12 km around Bengaluru (inside `DEFAULT_RADIUS_KM`) with rates inside bounds,
+  and one approved hirer.
+- **Idempotent** — keyed on category/profession slug and user email, so re-running
+  tops up rather than duplicating.
+- Two accounts use Gmail `+aliases` so both sides of the hiring flow can be signed
+  into from one inbox; the rest use an unroutable `.invalid` domain and exist as
+  searchable supply, not as accounts anyone logs into.
+- Sets `avgRating`/`ratingCount` directly for display; there are no matching
+  `ratings` rows, since a real rating requires a completed job. Ratings written
+  through the app stay transactionally consistent.
 
 ## src/routes/health.ts
 - `healthRouter` (mounted at `/api/health`):
